@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <string.h>
 
 #define HABITS_FILE ".habits.csv"
 
@@ -19,13 +20,15 @@ enum {
 enum menu_indices {
     idx_add = 0,
     idx_settings,
+    idx_delete,
     idx_exit,
     menu_count
 };
 
 #define CMD_ADD -1
 #define CMD_SETTINGS -2
-#define CMD_EXIT -3
+#define CMD_DELETE -3
+#define CMD_EXIT -4
 
 // --- 2. Type Definitions ---
 typedef void (*draw_item_func)(int index, int y, int x, bool highlighted, void *arg);
@@ -36,11 +39,11 @@ typedef struct Habit {
     int completed;
 } Habit;
 
-static int menu_engine(int count, int start_y, int start_x, int initial_highlight, bool horizontal_list,
+static int menu_engine(int count, int start_y, int start_x, int *initial_highlight, bool horizontal_list,
         bool interactive, draw_item_func draw_item, void *arg)
 {
     int key;
-    int highlight = initial_highlight;
+    int highlight = interactive ? *initial_highlight : -1;
     int cur_y, cur_x;
     
     // Disable timeout so the menu waits forever for user input
@@ -69,9 +72,15 @@ static int menu_engine(int count, int start_y, int start_x, int initial_highligh
 
         key = getch();
         switch(key) {
-            case '1': return CMD_ADD;
-            case '2': return CMD_SETTINGS;
-            case '3': return CMD_EXIT;
+            case '1': 
+                return CMD_ADD;
+            case '2': 
+                return CMD_SETTINGS;
+            case '3': 
+                *initial_highlight = highlight;
+                return CMD_DELETE;
+            case '4': 
+                return CMD_EXIT;
             case KEY_UP:
                 highlight = (highlight - 1 + count) % count;
                 break;
@@ -120,29 +129,59 @@ static void menu_bar(int start_x, int start_y)
     static const char *menu_items[menu_count] = {
         "(1) Add new habit",
         "(2) Settings",
-        "(3) Exit"
+        "(3) Delete",
+        "(4) Exit"
     };
 
-    menu_engine(menu_count, start_y, start_x, -1, true, false, draw_bar_item, menu_items);
+    menu_engine(menu_count, start_y, start_x, NULL, true, false, draw_bar_item, menu_items);
 }
 
-static void add_new_habit(Habit *list, int *current_total, int x, int y) {
+static void add_new_habit(Habit *list, int *current_total) {
     if(*current_total >= max_habits_amount) return;
-    clear();
+
     curs_set(1);
     echo();
-    mvprintw(y, x, "New habit name: ");
-    getnstr(list[*current_total].name, name_max_length - 1);
+    int rows, cols;
+    getmaxyx(stdscr, rows, cols);
+
+    int height = 3;
+    int width = 50;
+    int start_y = (rows - height) / 2;
+    int start_x = (cols - width) / 2;
+
+    WINDOW *win = newwin(height, width, start_y, start_x);
+    keypad(win, TRUE);
+    
+    wbkgd(win, COLOR_PAIR(3));
+    box(win, 0, 0); 
+
+    const char *prompt = " Your habit: ";
+    mvwprintw(win, 1, 1, "%s", prompt);
+    wmove(win, 1, 1 + strlen(prompt));
+    wrefresh(win);
+
+    wgetnstr(win, list[*current_total].name, name_max_length - 1);
     timeout(default_timeout);
     list[*current_total].completions = 0;
     list[*current_total].completed = 0;
+    (*current_total)++;
+
     noecho();
     curs_set(0);
-    (*current_total)++;
+    delwin(win);
+}
+
+static void delete_habit(int index, Habit *habits, int *current_total)
+{
+    int i;
+    for(i = index; i < *current_total; i++) {
+        habits[i] = habits[i+1];
+    }
+    (*current_total)--;
 }
 
 // Forward declaration so main_screen and analyze_options can talk to each other
-static void analyze_options(int option, Habit *habits, int *current_total, int x, int y);
+static void analyze_options(int option, int highlight, Habit *habits, int *current_total, int x, int y);
 
 static void main_screen(Habit *habits, int *habits_total, int start_y, int start_x) {
     int current_highlight = 0;
@@ -158,35 +197,92 @@ static void main_screen(Habit *habits, int *habits_total, int start_y, int start
 
         menu_bar(start_x, row - 2); 
 
-        if (*habits_total == 0) {
-            mvprintw(start_y, start_x, "No habits yet. Press ESC for menu.");
-            int cmd = getch();
-            if (cmd == '1') analyze_options(idx_add, habits, habits_total, start_x, start_y);
-            if (cmd == '3') analyze_options(idx_exit, habits, habits_total, start_x, start_y);
-        } else {
-            int choice = menu_engine(*habits_total, start_y, start_x, current_highlight, false, true, draw_habit_item, habits);
+        if (*habits_total == 0)
+            mvprintw(start_y, start_x, "No habits yet. See menu bar for possible actions.");
 
-            if(choice < 0) {
-                analyze_options(choice, habits, habits_total, start_x, start_y);
-            } else {
-                current_highlight = choice;
-                habits[choice].completed = !habits[choice].completed;
-                if(habits[choice].completed) 
-                    habits[choice].completions++;
-                else
-                    habits[choice].completions--; // Optional: decrement if unchecked
-            }
+        int choice = menu_engine(*habits_total, start_y, start_x, &current_highlight, false, true, draw_habit_item, habits);
+
+        if(choice < 0) {
+            analyze_options(choice, current_highlight, habits, habits_total, start_x, start_y);
+        } else {
+            current_highlight = choice;
+            habits[choice].completed = !habits[choice].completed;
+            if(habits[choice].completed) 
+                habits[choice].completions++;
+            else
+                habits[choice].completions--; // Optional: decrement if unchecked
         }
     }
 }
 
-static void analyze_options(int option, Habit *habits, int *current_total, int x, int y) {
+static bool confirm_delete(const char *habit_name) {
+    int rows, cols;
+    getmaxyx(stdscr, rows, cols);
+
+    int height = 8;
+    int width = 50;
+    int start_y = (rows - height) / 2;
+    int start_x = (cols - width) / 2;
+
+    WINDOW *win = newwin(height, width, start_y, start_x);
+    keypad(win, TRUE);
+    
+    wbkgd(win, COLOR_PAIR(3));
+    box(win, 0, 0); 
+
+    // 4. Draw Content
+    wattron(win, A_BOLD);
+    mvwprintw(win, 1, (width - 14) / 2, " CONFIRMATION "); // 14 here is the length of the string passed
+    wattroff(win, A_BOLD);
+
+    mvwprintw(win, 3, (width - 32) / 2, "Are you sure you want to delete:"); // 32 is the length of the string
+    
+    // Highlight the habit name in Red to show it's the target of deletion
+    wattron(win, COLOR_PAIR(4));
+    mvwprintw(win, 4, (width - strlen(habit_name) - 2) / 2, "'%s'?", habit_name);
+    wattroff(win, COLOR_PAIR(4));
+
+    // Drawing "Buttons"
+    int btn_y = 6;
+    
+    // The "Cancel" option (Neutral/Minimalist)
+    mvwaddstr(win, btn_y, (width / 2) + 2, "[N]o");
+
+    // The "Delete" option (Highlighted in Red)
+    wattron(win, COLOR_PAIR(4));
+    mvwaddstr(win, btn_y, (width / 2) - 12, "[Y]es");
+    wattroff(win, COLOR_PAIR(4));
+
+    wrefresh(win);
+
+    // 5. Input Loop
+    bool result = false;
+    while (1) {
+        int ch = wgetch(win);
+        if (ch == 'y' || ch == 'Y') {
+            result = true;
+            break;
+        } else if (ch == 'n' || ch == 'N' || ch == key_escape) {
+            result = false;
+            break;
+        }
+    }
+
+    delwin(win);
+    return result;
+}
+
+static void analyze_options(int option, int highlight, Habit *habits, int *current_total, int x, int y) {
     switch(option) {
         case CMD_ADD:
-            add_new_habit(habits, current_total, x, y);
+            add_new_habit(habits, current_total);
             break;
         case CMD_SETTINGS:
             // Placeholder for settings
+            break;
+        case CMD_DELETE:
+            if(confirm_delete(habits[highlight].name))
+                delete_habit(highlight, habits, current_total);
             break;
         case CMD_EXIT:
             upload_to_disk(habits, *current_total);
@@ -219,8 +315,10 @@ int main() {
     noecho();
     keypad(stdscr, 1);
     start_color();
-    init_pair(1, COLOR_BLACK, COLOR_GREEN); // Active Highlight
-    init_pair(2, COLOR_BLACK, COLOR_CYAN); // Menu Bar
+    init_pair(1, COLOR_CYAN, COLOR_BLACK); // Active Habit
+    init_pair(2, COLOR_BLACK, COLOR_WHITE); // Menu Bar
+    init_pair(3, COLOR_BLACK, COLOR_WHITE);
+    init_pair(4, COLOR_RED, COLOR_WHITE);
     curs_set(0);
 
     getmaxyx(stdscr, row, col);
