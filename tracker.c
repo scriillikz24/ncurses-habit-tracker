@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
+#include <time.h>
 
 #define HABITS_FILE ".habits.csv"
 
@@ -13,8 +14,9 @@ enum {
     default_timeout = 100, 
     name_max_length = 50,
     max_habits_amount = 5, 
-    habit_fields = 3,
-    bar_gap = 4
+    habit_fields = 4,
+    bar_gap = 4,
+    year_days = 366,
 };
 
 enum menu_indices {
@@ -36,8 +38,43 @@ typedef void (*draw_item_func)(int index, int y, int x, bool highlighted, void *
 typedef struct Habit {
     char name[name_max_length];
     int completions;
-    int completed;
+    time_t last_done;
+    bool history[year_days];
 } Habit;
+
+static void check_and_reset_habits(Habit *list, int total)
+{
+    time_t now = time(NULL);
+    struct tm *current_time = localtime(&now);
+
+    int cur_day = current_time->tm_yday;
+    int cur_year = current_time->tm_year;
+
+    for(int i = 0; i < total; i++) {
+        if(list[i].last_done == 0) continue;
+
+        struct tm *last_tm = localtime(&list[i].last_done);
+
+        if(cur_day != last_tm->tm_yday || cur_year != last_tm->tm_year) 
+            list[i].history[cur_day] = false;
+    }
+}
+
+static void mark_habit_done(Habit *habit) {
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    int today = t->tm_yday;
+
+    habit->history[today] = !habit->history[today];
+    if(habit->history[today]) {
+        habit->completions++;
+        habit->last_done = now;
+    }
+    else {
+        habit->completions--;
+        habit->last_done = 0;
+    }
+}
 
 static int menu_engine(int count, int start_y, int start_x, int *initial_highlight, bool horizontal_list,
         bool interactive, draw_item_func draw_item, void *arg)
@@ -93,18 +130,31 @@ static int menu_engine(int count, int start_y, int start_x, int *initial_highlig
     }
 }
 
-// --- 4. Callbacks (Specific Drawing Logic) ---
-
 void draw_start_menu_item(int i, int y, int x, bool highlighted, void *arg) {
     const char **items = (const char **)arg;
     mvaddstr(y, x, items[i]);
 }
 
+char get_history_char(Habit *h, int today, int offset)
+{
+    int index = today - offset;
+    if(index < 0)
+        index += 366;
+    return h->history[index] ? 'x' : ' ';
+}
+
 void draw_habit_item(int i, int y, int x, bool highlighted, void *arg) {
     Habit *habits = (Habit *)arg;
-    mvprintw(y, x, "[%c] %-15s: %2d completions.", 
-             habits[i].completed ? 'x' : ' ',
-             habits[i].name, habits[i].completions);
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    int today = t->tm_yday;
+    mvprintw(y, x, "%-15s ", habits[i].name);
+    for(int d = 6; d >= 0; d--) {
+        char c = get_history_char(&habits[i], today, d);
+        if(d == 0) attron(COLOR_PAIR(3));
+        printw("[%c]", c);
+        if(d == 0) attroff(COLOR_PAIR(3));
+    }
 }
 
 void draw_bar_item(int i, int y, int x, bool highlighted, void *arg)
@@ -118,8 +168,18 @@ void draw_bar_item(int i, int y, int x, bool highlighted, void *arg)
 static void upload_to_disk(Habit *habits, int current_total) {
     FILE *dest = fopen(HABITS_FILE, "w");
     if(!dest) return;
+    char s[year_days + 1];
     for(int i = 0; i < current_total; i++) {
-        fprintf(dest, "%s,%d,%d\n", habits[i].name, habits[i].completions, habits[i].completed);
+        memset(s, '0', year_days);
+        s[year_days] = '\0';
+        for(int j = 0; j < year_days; j++)
+            s[j] = habits[i].history[j] ? '1' : '0';
+        s[year_days] = '\0';
+        fprintf(dest, "%s,%d,%ld,%s\n", 
+                habits[i].name, 
+                habits[i].completions, 
+                habits[i].last_done, 
+                s);
     }
     fclose(dest);
 }
@@ -145,7 +205,7 @@ static void add_new_habit(Habit *list, int *current_total) {
     getmaxyx(stdscr, rows, cols);
 
     int height = 3;
-    int width = 50;
+    int width = name_max_length + 10;
     int start_y = (rows - height) / 2;
     int start_x = (cols - width) / 2;
 
@@ -163,7 +223,9 @@ static void add_new_habit(Habit *list, int *current_total) {
     wgetnstr(win, list[*current_total].name, name_max_length - 1);
     timeout(default_timeout);
     list[*current_total].completions = 0;
-    list[*current_total].completed = 0;
+    list[*current_total].last_done = 0;
+    for(int i = 0; i < year_days; i++)
+        list[*current_total].history[i] = false;
     (*current_total)++;
 
     noecho();
@@ -206,11 +268,7 @@ static void main_screen(Habit *habits, int *habits_total, int start_y, int start
             analyze_options(choice, current_highlight, habits, habits_total, start_x, start_y);
         } else {
             current_highlight = choice;
-            habits[choice].completed = !habits[choice].completed;
-            if(habits[choice].completed) 
-                habits[choice].completions++;
-            else
-                habits[choice].completions--; // Optional: decrement if unchecked
+            mark_habit_done(&habits[choice]);
         }
     }
 }
@@ -298,9 +356,14 @@ static void load_habits(Habit *habits, int *current_total) {
     if(!from) return;
     char line[128];
     int i = 0;
+    char s[year_days + 1];
     while(fgets(line, sizeof(line), from) && i < max_habits_amount) {
-        if(sscanf(line, " %49[^,],%d,%d", habits[i].name, &habits[i].completions, &habits[i].completed) == habit_fields)
+        if(sscanf(line, " %49[^,],%d,%ld,%s", habits[i].name, &habits[i].completions, 
+                    &habits[i].last_done, s) == habit_fields) {
+            for(int j = 0; j < year_days; j++)
+                habits[i].history[j] = (s[j] == '1');
             i++;
+        }
     }
     *current_total = i;
     fclose(from);
@@ -325,6 +388,7 @@ int main() {
     int start_x = (col / 2) - 20;
 
     load_habits(my_habits, &habits_total);
+    check_and_reset_habits(my_habits, habits_total);
 
     // Enter the main app loop
     main_screen(my_habits, &habits_total, row/2, start_x);
