@@ -16,7 +16,8 @@ enum {
     max_habits_amount = 5, 
     habit_fields = 4,
     bar_gap = 4,
-    year_days = 366,
+    days_in_year = 366,
+    days_in_week = 7
 };
 
 enum menu_indices {
@@ -33,13 +34,12 @@ enum menu_indices {
 #define CMD_EXIT -4
 
 // --- 2. Type Definitions ---
-typedef void (*draw_item_func)(int index, int y, int x, bool highlighted, void *arg);
 
 typedef struct Habit {
     char name[name_max_length];
     int completions;
     time_t last_done;
-    bool history[year_days];
+    bool history[days_in_year];
 } Habit;
 
 static void check_and_reset_habits(Habit *list, int total)
@@ -60,13 +60,11 @@ static void check_and_reset_habits(Habit *list, int total)
     }
 }
 
-static void mark_habit_done(Habit *habit) {
+static void mark_habit_done(Habit *habit, int day) {
     time_t now = time(NULL);
-    struct tm *t = localtime(&now);
-    int today = t->tm_yday;
 
-    habit->history[today] = !habit->history[today];
-    if(habit->history[today]) {
+    habit->history[day] = !habit->history[day];
+    if(habit->history[day]) {
         habit->completions++;
         habit->last_done = now;
     }
@@ -76,37 +74,59 @@ static void mark_habit_done(Habit *habit) {
     }
 }
 
-static int menu_engine(int count, int start_y, int start_x, int *initial_highlight, bool horizontal_list,
-        bool interactive, draw_item_func draw_item, void *arg)
+static void menu_bar_engine(int count, int start_y, int start_x, const char **menu_items)
 {
-    int key;
-    int highlight = interactive ? *initial_highlight : -1;
     int cur_y, cur_x;
-    
-    // Disable timeout so the menu waits forever for user input
-    timeout(-1); 
-
-    while(1) {
+    for(int i = 0; i < count; i++) {
         int x_offset = start_x;
         for(int i = 0; i < count; i++) {
-            if(i == highlight && interactive) attron(COLOR_PAIR(1));
-            else if(!interactive) attron(COLOR_PAIR(2));
-            
-            if(!horizontal_list)
-                draw_item(i, start_y + i, start_x, i == highlight, arg);
-            else {
-                draw_item(i, start_y, x_offset, i == highlight, arg);
-                getyx(stdscr, cur_y, cur_x);
-                x_offset = cur_x + bar_gap;
-            }
-
-            attroff(COLOR_PAIR(1));
+            attron(COLOR_PAIR(2));
+            mvaddstr(start_y, x_offset, menu_items[i]);
+            getyx(stdscr, cur_y, cur_x);
+            x_offset = cur_x + bar_gap;
             attroff(COLOR_PAIR(2));
         }
         refresh();
-        
-        if(!interactive) return highlight;
+    }
+}
 
+char get_history_char(Habit *h, int today, int offset)
+{
+    int index = today - offset;
+    if(index < 0)
+        index += 366;
+    return h->history[index] ? 'x' : ' ';
+}
+
+void draw_habit_item(int i, int y, int x, int wday, bool highlighted, Habit *habits) { //wday - week day
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    int ytoday = t->tm_yday;
+
+    mvprintw(y, x, "%-30.30s ", habits[i].name);
+    for(int d = 6; d >= 0; d--) {
+        char c = get_history_char(&habits[i], ytoday, d);
+        if(d == wday && highlighted) attron(COLOR_PAIR(3));
+        printw("[%c]", c);
+        if(d == wday && highlighted) attroff(COLOR_PAIR(3));
+    }
+}
+
+static int main_screen_engine(int count, int start_y, int start_x, int *year_day, int wday, int *initial_highlight, Habit *habits) 
+{
+    int key;
+    int highlight = *initial_highlight;
+
+    timeout(-1); 
+
+    while(1) {
+        for(int i = 0; i < count; i++) {
+            if(i == highlight) attron(COLOR_PAIR(1));
+            draw_habit_item(i, start_y + i, start_x, wday, i == highlight, habits);
+            attroff(COLOR_PAIR(1));
+        }
+        refresh();
+        
         key = getch();
         switch(key) {
             case '1': 
@@ -124,57 +144,30 @@ static int menu_engine(int count, int start_y, int start_x, int *initial_highlig
             case KEY_DOWN:
                 highlight = (highlight + 1) % count;
                 break;
+            case KEY_LEFT:
+                *year_day = (*year_day + 1) % days_in_year;
+                wday = (wday + 1) % days_in_week;
+                break;
+            case KEY_RIGHT:
+                *year_day = (*year_day - 1 + days_in_year) % days_in_year;
+                wday = (wday - 1 + days_in_week) % days_in_week;
+                break;
             case key_enter:
                 return highlight; 
         }
     }
 }
 
-void draw_start_menu_item(int i, int y, int x, bool highlighted, void *arg) {
-    const char **items = (const char **)arg;
-    mvaddstr(y, x, items[i]);
-}
-
-char get_history_char(Habit *h, int today, int offset)
-{
-    int index = today - offset;
-    if(index < 0)
-        index += 366;
-    return h->history[index] ? 'x' : ' ';
-}
-
-void draw_habit_item(int i, int y, int x, bool highlighted, void *arg) {
-    Habit *habits = (Habit *)arg;
-    time_t now = time(NULL);
-    struct tm *t = localtime(&now);
-    int today = t->tm_yday;
-    mvprintw(y, x, "%-15s ", habits[i].name);
-    for(int d = 6; d >= 0; d--) {
-        char c = get_history_char(&habits[i], today, d);
-        if(d == 0) attron(COLOR_PAIR(3));
-        printw("[%c]", c);
-        if(d == 0) attroff(COLOR_PAIR(3));
-    }
-}
-
-void draw_bar_item(int i, int y, int x, bool highlighted, void *arg)
-{
-    const char **items = (const char **)arg;
-    mvaddstr(y, x, items[i]);
-}
-
-// --- 5. Logic and Screens ---
-
 static void upload_to_disk(Habit *habits, int current_total) {
     FILE *dest = fopen(HABITS_FILE, "w");
     if(!dest) return;
-    char s[year_days + 1];
+    char s[days_in_year + 1];
     for(int i = 0; i < current_total; i++) {
-        memset(s, '0', year_days);
-        s[year_days] = '\0';
-        for(int j = 0; j < year_days; j++)
+        memset(s, '0', days_in_year);
+        s[days_in_year] = '\0';
+        for(int j = 0; j < days_in_year; j++)
             s[j] = habits[i].history[j] ? '1' : '0';
-        s[year_days] = '\0';
+        s[days_in_year] = '\0';
         fprintf(dest, "%s,%d,%ld,%s\n", 
                 habits[i].name, 
                 habits[i].completions, 
@@ -193,7 +186,7 @@ static void menu_bar(int start_x, int start_y)
         "(4) Exit"
     };
 
-    menu_engine(menu_count, start_y, start_x, NULL, true, false, draw_bar_item, menu_items);
+    menu_bar_engine(menu_count, start_y, start_x, menu_items);
 }
 
 static void add_new_habit(Habit *list, int *current_total) {
@@ -224,7 +217,7 @@ static void add_new_habit(Habit *list, int *current_total) {
     timeout(default_timeout);
     list[*current_total].completions = 0;
     list[*current_total].last_done = 0;
-    for(int i = 0; i < year_days; i++)
+    for(int i = 0; i < days_in_year; i++)
         list[*current_total].history[i] = false;
     (*current_total)++;
 
@@ -242,12 +235,39 @@ static void delete_habit(int index, Habit *habits, int *current_total)
     (*current_total)--;
 }
 
-// Forward declaration so main_screen and analyze_options can talk to each other
+static int get_week_day(int today, int offset)
+{
+    int index = today - offset;
+    if(index < 0)
+        index += 7;
+    return index;
+}
+
+static void print_week_days(int start_y, int start_x)
+{
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    int today = t->tm_wday;
+
+    const char *week_days[] = {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"};
+
+    move(start_y - 1, start_x + 31);
+    for(int i = 0; i < days_in_week; i++) {
+        int index = get_week_day(today, days_in_week - i - 1);
+        printw("%s ", week_days[index]);
+    }
+}
+
 static void analyze_options(int option, int highlight, Habit *habits, int *current_total, int x, int y);
 
 static void main_screen(Habit *habits, int *habits_total, int start_y, int start_x) {
     int current_highlight = 0;
     int row, col;
+
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    int year_day = t->tm_yday;
+    int week_day = t->tm_wday;
 
     while(1) {
         getmaxyx(stdscr, row, col);
@@ -257,18 +277,19 @@ static void main_screen(Habit *habits, int *habits_total, int start_y, int start
         mvprintw(start_y - 3, start_x, "HABITS LIST");
         attroff(A_BOLD | A_UNDERLINE);
 
+        print_week_days(start_y, start_x);
         menu_bar(start_x, row - 2); 
 
         if (*habits_total == 0)
             mvprintw(start_y, start_x, "No habits yet. See menu bar for possible actions.");
 
-        int choice = menu_engine(*habits_total, start_y, start_x, &current_highlight, false, true, draw_habit_item, habits);
+        int choice = main_screen_engine(*habits_total, start_y, start_x, &year_day, week_day, &current_highlight, habits);
 
         if(choice < 0) {
             analyze_options(choice, current_highlight, habits, habits_total, start_x, start_y);
         } else {
             current_highlight = choice;
-            mark_habit_done(&habits[choice]);
+            mark_habit_done(&habits[choice], year_day);
         }
     }
 }
@@ -356,11 +377,11 @@ static void load_habits(Habit *habits, int *current_total) {
     if(!from) return;
     char line[128];
     int i = 0;
-    char s[year_days + 1];
+    char s[days_in_year + 1];
     while(fgets(line, sizeof(line), from) && i < max_habits_amount) {
         if(sscanf(line, " %49[^,],%d,%ld,%s", habits[i].name, &habits[i].completions, 
                     &habits[i].last_done, s) == habit_fields) {
-            for(int j = 0; j < year_days; j++)
+            for(int j = 0; j < days_in_year; j++)
                 habits[i].history[j] = (s[j] == '1');
             i++;
         }
