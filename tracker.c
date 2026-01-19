@@ -129,43 +129,6 @@ static void draw_habit_item(int y, int x, int selected_yday, bool highlighted, H
     }
 }
 
-static void draw_habit_item_two(int y, int x, int selected_yday, bool highlighted, Habit habit) {
-    time_t now = time(NULL);
-    int real_today = localtime(&now)->tm_yday + debug_day;
-
-    int day_offset = real_today - selected_yday;
-    int target_column = days_in_week - 1 - day_offset;
-
-    int streak = get_streak(habit, real_today);
-
-    mvprintw(y, x, "[%d] ", streak);
-
-    int cur_y, cur_x;
-
-    printw("%s", habit.name);
-
-    int checkbox_start_col = x + checkbox_offset;
-    getyx(stdscr, cur_y, cur_x);
-    while(cur_x < checkbox_start_col) {
-        addch(' ');
-        cur_x++;
-    }
-
-    for(int wd = 0; wd < days_in_week; wd++) {
-        int history_idx = real_today - (days_in_week - 1 - wd);
-        if(history_idx < 0) 
-            history_idx += days_in_year;
-        char c = habit.history[history_idx] ? 'x' : ' ';
-
-        if(wd == target_column && highlighted) attron(COLOR_PAIR(2));
-        printw("[%c]", c);
-        if(wd == target_column && highlighted) {
-            attroff(COLOR_PAIR(2));
-            attron(COLOR_PAIR(1));
-        }
-    }
-}
-
 static void upload_to_disk(Habit *habits, int current_total) {
     FILE *dest = fopen(HABITS_FILE, "w");
     if(!dest) return;
