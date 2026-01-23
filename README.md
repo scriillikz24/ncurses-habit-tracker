@@ -1,4 +1,4 @@
-## Terminal Habit Tracker
+# Terminal Habit Tracker
 A lightweight, distraction-free **Habit Tracker** built in C using the ncurses library. Keep track of your daily goals, monitor your streaks, and visualize your progress directly from your terminal.
 
 ## Features
