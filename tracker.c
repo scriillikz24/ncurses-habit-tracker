@@ -25,7 +25,6 @@ enum {
 
 enum menu_indices {
     idx_add = 0,
-    idx_settings,
     idx_delete,
     idx_rename,
     idx_calendar,
@@ -149,11 +148,10 @@ static void action_bar(int rows, int cols)
 {
     static const char *menu_items[menu_count] = {
         "(1) Add habit",
-        "(2) Settings",
-        "(3) Delete",
-        "(4) Rename",
-        "(5) Calendar",
-        "(6) Exit"
+        "(2) Delete",
+        "(3) Rename",
+        "(4) Calendar",
+        "(5) Exit"
     };
     int total_width = 0;
     for(int i = 0; i < menu_count; i++) total_width += strlen(menu_items[i]) + bar_gap;
@@ -193,8 +191,10 @@ static void add_habit(Habit *list, int *current_total) {
     wbkgd(win, COLOR_PAIR(3));
     box(win, 0, 0); 
 
+    wattron(win, COLOR_PAIR(5));
+    mvwprintw(win, 1, width - 9, "(<- Esc)");
+    wattroff(win, COLOR_PAIR(5));
     mvwprintw(win, 1, 1, "Your habit: ");
-    wrefresh(win);
 
     char temp_name[name_max_length] = {0};
     int char_count = 0;
@@ -270,6 +270,9 @@ static void rename_habit(Habit *habit)
     box(win, 0, 0); 
 
     mvwprintw(win, 1, 2, "Current name: %s", habit->name);
+    wattron(win, COLOR_PAIR(5));
+    mvwprintw(win, 1, width - 9, "<- Esc");
+    wattroff(win, COLOR_PAIR(5));
 
     mvwprintw(win, 3, 2, "New name: ");
     wrefresh(win);
@@ -429,6 +432,7 @@ static void draw_calendar(Habit *h) {
     mktime(&last_val);
     int days_in_month = last_val.tm_mday;
 
+
     while(1) {
         // 4. UI Setup
         int rows, cols;
@@ -441,8 +445,10 @@ static void draw_calendar(Habit *h) {
         int start_y = (rows - 10) / 2;
 
         // 5. Draw Header
-        mvprintw(start_y, start_x + 5, "%s %d", months[current_month], current_year);
+        mvprintw(start_y, start_x + 8, "%s %d", months[current_month], current_year);
+        attron(COLOR_PAIR(5));
         mvprintw(start_y + 2, start_x + 1, "S  M  T  W  T  F  S");
+        attroff(COLOR_PAIR(5));
 
         // 6. Draw Days
         int row = 0;
@@ -454,9 +460,6 @@ static void draw_calendar(Habit *h) {
             int ui_x = start_x + (col * 3);
 
             // Determine Color
-            // If done: Green (Pair 4 or 6)
-            // If today: Bold/White (Pair 2 or standard)
-            // If missed: Dim or default
 
             bool is_done = h->history[history_idx];
             bool to_view = (day == view_day);
@@ -501,7 +504,19 @@ static void draw_calendar(Habit *h) {
 
         // Footer
         attron(COLOR_PAIR(5));
-        mvprintw(start_y, start_x - 7, "<- Esc");
+        mvprintw(start_y, start_x, "<- Esc");
+        attroff(COLOR_PAIR(5));
+
+        int total_done = 0;
+        for(int day = 1; day <= days_in_month; day++) {
+            int history_idx = start_yday + (day - 1);
+            if(h->history[history_idx])
+                total_done++;
+        }
+
+        attron(COLOR_PAIR(5));
+        mvprintw(start_y + 8, start_x, "--------------------");
+        mvprintw(start_y + 9, start_x, "Done: %d", total_done);
         attroff(COLOR_PAIR(5));
         refresh();
 
@@ -585,14 +600,14 @@ static void main_screen(Habit *habits, int *total) {
             case 'a':
                 add_habit(habits, total); 
                 break;
-            case '3': 
+            case '2': 
             case 'd':
                 if(*total > 0 && confirm_delete(habits[highlight].name)) {
                     delete_habit(highlight, habits, total);
                     if(highlight >= *total && highlight > 0) highlight--;
                 }
                 break;
-            case '4': 
+            case '3': 
             case 'r':
                 rename_habit(&habits[highlight]);
                 break;
@@ -600,12 +615,13 @@ static void main_screen(Habit *habits, int *total) {
             case 13: 
                 if(*total > 0) mark_habit_done(&habits[highlight], view_day); 
                 break;
-            case '5':
+            case '4':
             case 'c':
                 if(*total > 0) draw_calendar(&habits[highlight]);
                 break;
-            case '6': 
+            case '5': 
             case 'q':
+            case key_escape:
                 upload_to_disk(habits, *total);
                 endwin(); 
                 exit(0);
@@ -638,13 +654,13 @@ int main() {
     start_color();
     init_pair(1, COLOR_GREEN, COLOR_WHITE); 
     init_pair(2, COLOR_BLACK, COLOR_WHITE); 
-    init_pair(3, COLOR_WHITE, COLOR_BLACK); // Highlighted cell
+    init_pair(3, COLOR_WHITE, COLOR_BLACK);
     init_pair(4, COLOR_GREEN, COLOR_BLACK);
     init_pair(5, 242, COLOR_BLACK); // Dark gray on black
     init_pair(6, COLOR_GREEN, 242);
     init_pair(7, COLOR_RED, COLOR_BLACK);
     init_pair(8, COLOR_YELLOW, COLOR_BLACK);
-    init_pair(9, COLOR_RED, 242); // Calendar today
+    init_pair(9, COLOR_RED, 242);
     init_pair(10, COLOR_WHITE, 242);
     curs_set(0);
 
