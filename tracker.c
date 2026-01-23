@@ -78,9 +78,9 @@ static void draw_habit_item(int y, int x, int selected_yday, bool highlighted, H
 
     if (streak == 0) {
         // State: Inactive (Dimmed Dash)
-        attron(A_DIM); 
+        attron(COLOR_PAIR(5)); 
         printw("  -  ");
-        attroff(A_DIM);
+        attroff(COLOR_PAIR(5)); 
     } 
     else if (streak < days_in_week) {
         // State: Spark (Yellow, standard weight)
@@ -89,18 +89,16 @@ static void draw_habit_item(int y, int x, int selected_yday, bool highlighted, H
         attroff(COLOR_PAIR(8));
     } 
     else {
-        // State: ON FIRE (Red, Bold)
         attron(COLOR_PAIR(7) | A_BOLD); // Red + Bold
         printw(" %d ", streak);
         attroff(COLOR_PAIR(7) | A_BOLD);
     }
     // --- IMPROVED STREAK UI END ---
 
-    // The rest of your code works perfectly with this because 
-    // it calculates padding dynamically!
-    
     int cur_y, cur_x;
+    if(!highlighted) attron(COLOR_PAIR(5)); 
     printw("%s", habit.name);
+    if(!highlighted) attroff(COLOR_PAIR(5)); 
 
     int checkbox_start_col = x + checkbox_offset;
     getyx(stdscr, cur_y, cur_x);
@@ -116,15 +114,14 @@ static void draw_habit_item(int y, int x, int selected_yday, bool highlighted, H
         int history_idx = real_today - (days_in_week - 1 - wd);
         if(history_idx < 0) history_idx += days_in_year;
         
-        char c = habit.history[history_idx] ? 'x' : ' ';
+        char c = habit.history[history_idx] ? 'x' : '.';
         
-        // Use A_BOLD on the highlight to make the cursor 'pop' more
-        if(wd == target_column && highlighted) attron(COLOR_PAIR(2) | A_BOLD);
-        printw("[%c]", c);
+        attron(COLOR_PAIR(5)); 
+        if(wd == target_column && highlighted) attron(COLOR_PAIR(3));
+        printw(" %c ", c);
+        attroff(COLOR_PAIR(5)); 
         if(wd == target_column && highlighted) {
-            attroff(COLOR_PAIR(2) | A_BOLD);
-            // Restore normal row highlight if needed
-            attron(COLOR_PAIR(1)); 
+            attroff(COLOR_PAIR(2));
         }
     }
 }
@@ -165,7 +162,7 @@ static void action_bar(int rows, int cols)
     int x_offset = (cols - total_width) / 2;
     int y_pos = rows - 2;
 
-    attron(COLOR_PAIR(2));
+    attron(COLOR_PAIR(3));
     // Draw a background strip for the menu
     mvhline(y_pos, 0, ' ', cols); 
     
@@ -173,7 +170,7 @@ static void action_bar(int rows, int cols)
         mvaddstr(y_pos, x_offset, menu_items[i]);
         x_offset += strlen(menu_items[i]) + bar_gap;
     }
-    attroff(COLOR_PAIR(2));
+    attroff(COLOR_PAIR(3));
 }
 
 static void add_habit(Habit *list, int *current_total) {
@@ -324,18 +321,22 @@ static void print_week_labels(int y, int x)
     struct tm *t = localtime(&now);
     int today_wday = t->tm_wday + debug_day;
 
-    const char *days[] = {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"};
+    const char days[] = {'S', 'M', 'T', 'W', 'T', 'F', 'S'};
 
     move(y, x + checkbox_offset);
+    attron(COLOR_PAIR(5));
     for(int i = 0; i < days_in_week; i++) {
-        if(i == days_in_week - 1)
+        if(i == days_in_week - 1) {
+            attroff(COLOR_PAIR(5));
             attron(COLOR_PAIR(7));
+        }
         int idx = (today_wday - (days_in_week - 1 - i) + days_in_week) % days_in_week;
-        printw("%s ", days[idx]);
-        if(i == days_in_week - 1)
+        printw(" %c ", days[idx]);
+        if(i == days_in_week - 1) {
+            attron(COLOR_PAIR(5));
             attroff(COLOR_PAIR(7));
+        }
     }
-    printw("  <-- the red one is today");
 }
 
 static bool confirm_delete(const char *habit_name) {
@@ -409,7 +410,8 @@ static void draw_calendar(Habit *h) {
 
     int current_month = t->tm_mon; // 0-11
     int current_year = t->tm_year + 1900;
-    int today_mday = t->tm_mday;
+    int real_today = t->tm_mday;
+    int view_day = real_today;
 
     // 2. Find out when the 1st of the month starts
     struct tm first_val = *t;
@@ -427,67 +429,109 @@ static void draw_calendar(Habit *h) {
     mktime(&last_val);
     int days_in_month = last_val.tm_mday;
 
-    // 4. UI Setup
-    int rows, cols;
-    getmaxyx(stdscr, rows, cols);
-    erase(); // Clear screen
+    while(1) {
+        // 4. UI Setup
+        int rows, cols;
+        getmaxyx(stdscr, rows, cols);
+        erase(); // Clear screen
 
-    // Calculate centering
-    // Calendar is roughly 20 chars wide (7 days * 3 chars)
-    int start_x = (cols - 22) / 2; 
-    int start_y = (rows - 10) / 2;
+        // Calculate centering
+        // Calendar is roughly 20 chars wide (7 days * 3 chars)
+        int start_x = (cols - 22) / 2; 
+        int start_y = (rows - 10) / 2;
 
-    // 5. Draw Header
-    attron(A_BOLD);
-    mvprintw(start_y, start_x + 2, "%s %d", months[current_month], current_year);
-    //mvprintw(start_y, start_x, "   %s %d", "Month", current_year); // You can add month names array if you want
-    mvprintw(start_y + 2, start_x, "Su Mo Tu We Th Fr Sa");
-    attroff(A_BOLD);
+        // 5. Draw Header
+        mvprintw(start_y, start_x + 5, "%s %d", months[current_month], current_year);
+        mvprintw(start_y + 2, start_x + 1, "S  M  T  W  T  F  S");
 
-    // 6. Draw Days
-    int row = 0;
-    int col = start_wday; // Start printing at the correct weekday column
+        // 6. Draw Days
+        int row = 0;
+        int col = start_wday; // Start printing at the correct weekday column
 
-    for (int day = 1; day <= days_in_month; day++) {
-        int history_idx = start_yday + (day - 1);
-        int ui_y = start_y + 3 + row;
-        int ui_x = start_x + (col * 3);
+        for (int day = 1; day <= days_in_month; day++) {
+            int history_idx = start_yday + (day - 1);
+            int ui_y = start_y + 3 + row;
+            int ui_x = start_x + (col * 3);
 
-        // Determine Color
-        // If done: Green (Pair 4 or 6)
-        // If today: Bold/White (Pair 2 or standard)
-        // If missed: Dim or default
-        
-        bool is_done = h->history[history_idx];
-        bool is_today = (day == today_mday);
+            // Determine Color
+            // If done: Green (Pair 4 or 6)
+            // If today: Bold/White (Pair 2 or standard)
+            // If missed: Dim or default
 
-        if (is_today && is_done) {
-            attron(A_REVERSE | COLOR_PAIR(4)); // Highlighted Green
-        } else if (is_today) {
-            attron(A_REVERSE); // Just Highlighted
-        } else if (is_done) {
-            attron(COLOR_PAIR(4)); // Green text
+            bool is_done = h->history[history_idx];
+            bool to_view = (day == view_day);
+            bool is_real_today = day == real_today;
+
+            if(to_view && is_real_today && is_done)
+                attron(COLOR_PAIR(6));
+            else if(to_view && is_real_today) 
+                attron(COLOR_PAIR(9));
+            else if(is_real_today && is_done)
+                attron(COLOR_PAIR(4));
+            else if(is_real_today)
+                attron(COLOR_PAIR(7));
+            else if (to_view && is_done)
+                attron(COLOR_PAIR(10));
+            else if (to_view)
+                attron(A_REVERSE); // Just Highlighted
+            else if (is_done)
+                attron(COLOR_PAIR(3)); // Cyan text
+            else
+                attron(COLOR_PAIR(5));
+
+            mvprintw(ui_y, ui_x, "%2d", day);
+
+            // Turn off attributes
+            if(to_view && is_real_today && is_done) attroff(COLOR_PAIR(6));
+            else if(to_view && is_real_today) attroff(COLOR_PAIR(9));
+            else if(is_real_today && is_done) attroff(COLOR_PAIR(4));
+            else if(is_real_today) attroff(COLOR_PAIR(7));
+            else if (to_view && is_done) attroff(A_REVERSE | COLOR_PAIR(4));
+            else if (to_view) attroff(A_REVERSE);
+            else if (is_done) attroff(COLOR_PAIR(4));
+            else attroff(COLOR_PAIR(5));
+
+            // Move to next column
+            col++;
+            if (col > 6) { // Wrap to next week
+                col = 0;
+                row++;
+            }
         }
 
-        mvprintw(ui_y, ui_x, "%2d", day);
+        // Footer
+        attron(COLOR_PAIR(5));
+        mvprintw(start_y, start_x - 7, "<- Esc");
+        attroff(COLOR_PAIR(5));
+        refresh();
 
-        // Turn off attributes
-        if (is_today && is_done) attroff(A_REVERSE | COLOR_PAIR(4));
-        else if (is_today) attroff(A_REVERSE);
-        else if (is_done) attroff(COLOR_PAIR(4));
-
-        // Move to next column
-        col++;
-        if (col > 6) { // Wrap to next week
-            col = 0;
-            row++;
+        int ch = getch();
+        switch(ch) {
+            case 'k':   
+            case KEY_UP:
+                if(view_day - days_in_week >= 1) view_day -= days_in_week;
+                break;
+            case 'j': 
+            case KEY_DOWN:
+                if(view_day + days_in_week <= days_in_month) view_day += days_in_week;
+                break;
+            case 'h': 
+            case KEY_LEFT:
+                view_day = (view_day - 1 + days_in_month) % days_in_month;
+                if(!view_day) view_day = days_in_month;
+                break;
+            case 'l': 
+            case KEY_RIGHT:
+                view_day = (view_day + 1) % days_in_month;
+                if(!view_day) view_day = days_in_month;
+                break;
+            case key_enter:
+                mark_habit_done(h, view_day - 1); 
+                break;
+            case key_escape: 
+                return;
         }
     }
-
-    // Footer
-    mvprintw(start_y + 3 + row + 2, start_x - 4, "Press any key to return");
-    refresh();
-    getch(); // Wait for user input
 }
 
 static void main_screen(Habit *habits, int *total) {
@@ -506,51 +550,50 @@ static void main_screen(Habit *habits, int *total) {
 
         erase();
 
-        attron(A_BOLD | A_UNDERLINE);
-        mvprintw(list_y - 4, list_x, "HABITS TRACKER");
-        attroff(A_BOLD | A_UNDERLINE);
+        //mvprintw(list_y - 4, list_x, "HABITS TRACKER");
 
-        if(*total == 0) {
+        if(*total == 0)
             mvprintw(list_y, list_x, "No habits found. Press (1) to add.");
-        } else {
+        else {
             print_week_labels(list_y - 1, list_x);
-            for(int i = 0; i < *total; i++) {
-                if(i == highlight) attron(COLOR_PAIR(1));
+            for(int i = 0; i < *total; i++)
                 draw_habit_item(list_y + i, list_x, view_day, i == highlight, habits[i]);
-                attroff(COLOR_PAIR(1));
-            }
         }
 
-        // 5. Draw Action Bar (passing screen dimensions for centering)
         action_bar(r, c);
-
-        // 6. SINGLE refresh at the end
         refresh();
 
         int ch = getch();
         switch(ch) {
-            case KEY_UP:   
+            case 'k':   
+            case KEY_UP:
                 if(*total > 0) highlight = (highlight - 1 + *total) % *total; 
                 break;
-            case KEY_DOWN: 
+            case 'j': 
+            case KEY_DOWN:
                 if(*total > 0) highlight = (highlight + 1) % *total; 
                 break;
-            case KEY_LEFT: 
+            case 'h': 
+            case KEY_LEFT:
                 if(view_day > real_today - 6) view_day--; 
                 break;
-            case KEY_RIGHT: 
+            case 'l': 
+            case KEY_RIGHT:
                 if(view_day < real_today) view_day++; 
                 break;
             case '1': 
+            case 'a':
                 add_habit(habits, total); 
                 break;
             case '3': 
+            case 'd':
                 if(*total > 0 && confirm_delete(habits[highlight].name)) {
                     delete_habit(highlight, habits, total);
                     if(highlight >= *total && highlight > 0) highlight--;
                 }
                 break;
             case '4': 
+            case 'r':
                 rename_habit(&habits[highlight]);
                 break;
             case key_enter: 
@@ -558,9 +601,11 @@ static void main_screen(Habit *habits, int *total) {
                 if(*total > 0) mark_habit_done(&habits[highlight], view_day); 
                 break;
             case '5':
+            case 'c':
                 if(*total > 0) draw_calendar(&habits[highlight]);
                 break;
             case '6': 
+            case 'q':
                 upload_to_disk(habits, *total);
                 endwin(); 
                 exit(0);
@@ -591,14 +636,16 @@ int main() {
     noecho();
     keypad(stdscr, 1);
     start_color();
-    init_pair(1, COLOR_CYAN, COLOR_BLACK); 
+    init_pair(1, COLOR_GREEN, COLOR_WHITE); 
     init_pair(2, COLOR_BLACK, COLOR_WHITE); 
     init_pair(3, COLOR_WHITE, COLOR_BLACK); // Highlighted cell
     init_pair(4, COLOR_GREEN, COLOR_BLACK);
-    init_pair(5, COLOR_WHITE, 235); 
-    init_pair(6, COLOR_WHITE, COLOR_GREEN);
+    init_pair(5, 242, COLOR_BLACK); // Dark gray on black
+    init_pair(6, COLOR_GREEN, 242);
     init_pair(7, COLOR_RED, COLOR_BLACK);
     init_pair(8, COLOR_YELLOW, COLOR_BLACK);
+    init_pair(9, COLOR_RED, 242); // Calendar today
+    init_pair(10, COLOR_WHITE, 242);
     curs_set(0);
 
     int total = 0;
