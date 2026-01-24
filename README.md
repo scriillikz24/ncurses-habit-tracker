@@ -6,17 +6,25 @@ A lightweight, distraction-free **Habit Tracker** built in C using the ncurses l
 - **Streak Tracking**: Automatic calculation of current streaks with visual indicators (Yellow for active, Bold Red for 7+ days).
 - **Calendar View**: A detailed monthly view to see your full history and toggle past completions.
 - **Persistence**: Data is automatically saved to a hidden .habits.csv file in your directory.
-- **Vim-Style Navigation**: Support for both Arrow Keys and hjkl navigation.
+- **Vim-Style Navigation**: Support for both Arrow Keys and `hjkl` navigation.
 - **Lightweight**: Minimal dependencies and lightning-fast execution.
 
 ## Installation & Compilation
-### Prerequisites
+### 1.Prerequisites
 You will need a C compiler (like `gcc`) and the `ncurses` development library.
 #### On Arch:
 ``` bash
 sudo pacman -S ncurses
 ```
-### Compiling the Program
+### 2.Get the Source Code
+Clone the repository or create the file manually:
+``` bash
+# Clone the repo
+git clone https://github.com/scriillikz24/ncurses-habit-tracker.git
+cd habit-tracker
+```
+*Or, if you are creating it from scratch, save the code into a file named `main.c`.*
+### 3.Compiling the Program
 Run the following command in your terminal to compile:
 ``` bash
 gcc -g main.c -lcurses -o habit_tracker
@@ -40,6 +48,7 @@ The tracker is designed for efficiency. Use the following keys:
 ## Data Storage
 Your data is stored in `.habits.csv`. The format is:`Name, Last_Done_Timestamp, Binary_History_String`
 This allows you to easily back up your data or even script external tools to read your progress.
+
 
 ## Configuration
 You can modify the constants at the top of the source code to customize your experience:
