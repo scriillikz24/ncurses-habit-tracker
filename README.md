@@ -21,7 +21,7 @@ Clone the repository or create the file manually:
 ``` bash
 # Clone the repo
 git clone https://github.com/scriillikz24/ncurses-habit-tracker.git
-cd habit-tracker
+cd ncurses-habit-tracker
 ```
 *Or, if you are creating it from scratch, save the code into a file named `main.c`.*
 ### 3.Compiling the Program
