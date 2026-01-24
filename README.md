@@ -49,7 +49,6 @@ The tracker is designed for efficiency. Use the following keys:
 Your data is stored in `.habits.csv`. The format is:`Name, Last_Done_Timestamp, Binary_History_String`
 This allows you to easily back up your data or even script external tools to read your progress.
 
-
 ## Configuration
 You can modify the constants at the top of the source code to customize your experience:
 - `max_habits_amount`: Increase this if you have more than 5 habits.
