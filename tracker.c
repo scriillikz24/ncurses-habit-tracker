@@ -12,20 +12,19 @@
 enum { 
     key_escape = 27, 
     key_enter = 10,
-    default_timeout = 100, 
     esc_hint_length = 6,
     name_max_length = 25,
     checkbox_offset = 30,
     dashboard_length = 49,
     calendar_length = 20,
     calendar_height = 8,
-    max_habits_amount = 5, 
-    habit_fields = 3,
+    action_bar_length = 57,
+    max_habits_amount = 10,
+    habit_fields = 4,
     bar_gap = 4,
     days_in_year = 366,
     days_in_week = 7,
     weeks_in_year = 53,
-    debug_day = 0
 };
 
 enum menu_indices {
@@ -42,6 +41,7 @@ enum menu_indices {
 typedef struct Habit {
     char name[name_max_length];
     time_t last_done;
+    int year;
     bool history[days_in_year];
 } Habit;
 
@@ -70,7 +70,7 @@ static int get_streak(Habit habit, int today)
 
 static void draw_habit_item(int y, int x, int selected_yday, bool highlighted, Habit habit) {
     time_t now = time(NULL);
-    int real_today = localtime(&now)->tm_yday + debug_day;
+    int real_today = localtime(&now)->tm_yday;
 
     int day_offset = real_today - selected_yday;
     int target_column = days_in_week - 1 - day_offset;
@@ -138,9 +138,10 @@ static void upload_to_disk(Habit *habits, int current_total) {
             s[j] = habits[i].history[j] ? '1' : '0';
         s[days_in_year] = '\0';
 
-        fprintf(dest, "%s,%ld,%s\n", 
+        fprintf(dest, "%s,%ld,%d,%s\n", 
                 habits[i].name, 
                 habits[i].last_done, 
+                habits[i].year,
                 s);
     }
     fclose(dest);
@@ -160,7 +161,7 @@ static void action_bar(int rows, int cols)
         total_width += strlen(menu_items[i]) + bar_gap;
 
     // Center the bar at the bottom of the screen
-    int x_offset = (cols - total_width) / 2;
+    int x_offset = (cols - total_width + bar_gap) / 2;
     int y_pos = rows - 2;
 
     // Draw a background strip for the menu
@@ -175,14 +176,58 @@ static void action_bar(int rows, int cols)
     }
 }
 
-static void add_habit(Habit *list, int *current_total) {
-    if(*current_total >= max_habits_amount) return;
+static bool get_text_input(WINDOW *win, char *buffer, int max_len) {
+    int char_count = strlen(buffer);
+    int ch;
+    curs_set(1);
+    
+    // If editing existing text, print it first
+    mvwprintw(win, 1, 1, "%s", buffer); 
+    wrefresh(win);
 
+    while(1) {
+        ch = wgetch(win);
+        if(ch == key_escape) {
+            curs_set(0);
+            return false; // User cancelled
+        }
+        else if(ch == key_enter) {
+            break; // User finished
+        }
+        else if(ch == KEY_BACKSPACE || ch == 127) { // Handle 127 for Mac/some terms
+            if(char_count > 0) {
+                char_count--;
+                buffer[char_count] = '\0';
+                mvwaddch(win, 1, 1 + char_count, ' '); // Clear visual
+                wmove(win, 1, 1 + char_count);         // Move cursor back
+            }
+        }
+        else if(ch >= 32 && ch <= 126 && char_count < max_len - 1) {
+            buffer[char_count] = (char)ch;
+            char_count++;
+            buffer[char_count] = '\0';
+            waddch(win, ch);
+        }
+        wrefresh(win);
+    }
+    curs_set(0);
+    return true;
+}
+
+static void add_habit(Habit *list, int *current_total) {
     clear();
     refresh();
 
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
+    char message[60];
+    snprintf(message, sizeof(message), "Cannot have more than %d habits. Press any key to return.", max_habits_amount);
+    if(*current_total >= max_habits_amount) {
+        mvprintw(rows / 2, (cols - strlen(message)) / 2, "%s", message);
+        getch();
+        return;
+    }
+
 
     int height = 3;
     int width = name_max_length + 25; // 25 chars for query text & <-Esc
@@ -197,52 +242,26 @@ static void add_habit(Habit *list, int *current_total) {
     wattron(win, COLOR_PAIR(3));
     mvwprintw(win, 1, width - esc_hint_length - 1, ESC_HINT);
     wattroff(win, COLOR_PAIR(3));
-    mvwprintw(win, 1, 1, "Your habit: ");
 
     char temp_name[name_max_length] = {0};
-    int char_count = 0;
-    int ch;
-
-    curs_set(1);
-
-    while(1) {
-        ch = wgetch(win);
-        if(ch == key_escape) {
-            curs_set(0);
-            delwin(win);
+    
+    do {
+        if(!get_text_input(win, temp_name, name_max_length)) {
+            delwin(0);
             return;
         }
-        else if(ch == key_enter) {
-            if(char_count > 0) {
-                strncpy(list[*current_total].name, 
-                        temp_name, name_max_length - 1);
-                list[*current_total].name[name_max_length - 1] = '\0';
-            }
-            break;
-        }
-        else if(ch == KEY_BACKSPACE && char_count > 0) {
-            char_count--;
-            temp_name[char_count] = '\0';
-            int cur_y, cur_x;
-            getyx(win, cur_y, cur_x);
-            mvwaddch(win, cur_y, cur_x - 1, ' ');
-            wmove(win, cur_y, cur_x - 1);
-        }
-        else if(ch >= 32 && ch <= 126 && 
-                char_count < name_max_length - 1) {
-            temp_name[char_count] = (char)ch;
-            char_count++;
-            waddch(win, ch);
-        }
-        wrefresh(win);
-    }
+    } while(strlen(temp_name) <= 0);
+    strncpy(list[*current_total].name, temp_name, name_max_length - 1);
+    list[*current_total].name[name_max_length - 1] = '\0';
+    
+    time_t now = time(NULL);
 
     list[*current_total].last_done = 0;
+    list[*current_total].year = localtime(&now)->tm_year + 1900;
     for(int i = 0; i < days_in_year; i++)
         list[*current_total].history[i] = false;
     (*current_total)++;
 
-    curs_set(0);
     delwin(win);
 }
 
@@ -263,7 +282,7 @@ static void rename_habit(Habit *habit)
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
 
-    int height = 5;
+    int height = 3;
     int width = name_max_length + 23;
     int start_y = (rows - height) / 2;
     int start_x = (cols - width) / 2;
@@ -273,61 +292,31 @@ static void rename_habit(Habit *habit)
     
     box(win, 0, 0); 
 
-    mvwprintw(win, 1, 2, "Current name: %s", habit->name);
     wattron(win, COLOR_PAIR(3));
     mvwprintw(win, 1, width - esc_hint_length - 1, ESC_HINT);
     wattroff(win, COLOR_PAIR(3));
-
-    mvwprintw(win, 3, 2, "New name: ");
     wrefresh(win);
 
     char temp_name[name_max_length] = {0};
-    int char_count = 0;
-    int ch;
-
-    curs_set(1);
-
-    while(1) {
-        ch = wgetch(win);
-        if(ch == key_escape) {
-            curs_set(0);
-            delwin(win);
+    strncpy(temp_name, habit->name, name_max_length - 1);
+    temp_name[name_max_length - 1] = '\0';
+    do {
+        if(!get_text_input(win, temp_name, name_max_length)) {
+            delwin(0);
             return;
         }
-        else if(ch == key_enter) {
-            if(char_count > 0) {
-                strncpy(habit->name, temp_name, name_max_length - 1);
-                habit->name[name_max_length - 1] = '\0';
-            }
-            break;
-        }
-        else if(ch == KEY_BACKSPACE && char_count > 0) {
-            char_count--;
-            temp_name[char_count] = '\0';
-            int cur_y, cur_x;
-            getyx(win, cur_y, cur_x);
-            mvwaddch(win, cur_y, cur_x - 1, ' ');
-            wmove(win, cur_y, cur_x - 1);
-        }
-        else if(ch >= 32 && ch <= 126 && 
-                char_count < name_max_length - 1) {
-            temp_name[char_count] = (char)ch;
-            char_count++;
-            waddch(win, ch);
-        }
-        wrefresh(win);
-    }
+    } while(strlen(temp_name) <= 0);
+    strncpy(habit->name, temp_name, name_max_length - 1);
+    habit->name[name_max_length - 1] = '\0';
 
-    curs_set(0);
     delwin(win);
-
 }
 
 static void print_week_labels(int y, int x)
 {
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
-    int today_wday = t->tm_wday + debug_day;
+    int today_wday = t->tm_wday;
 
     const char days[] = {'S', 'M', 'T', 'W', 'T', 'F', 'S'};
 
@@ -554,7 +543,7 @@ static void draw_calendar(Habit *h) {
     }
 }
 
-static void draw_daily_progress(int rows, int cols, Habit *habits, int total, int view_day) {
+static void draw_status_bar(int rows, int cols, Habit *habits, int total, int view_day) {
     if (total == 0) return; // Prevent division by zero
 
     // 1. Calculate counts
@@ -577,8 +566,8 @@ static void draw_daily_progress(int rows, int cols, Habit *habits, int total, in
     int filled_len = (int)((float)completed / total * bar_width);
 
     // 3. Draw the Bar
-    int x_pos = (cols / 2) - (dashboard_length / 2) + 1;
-    int y_pos = (rows / 2) - (total / 2) - 2;
+    int x_pos = (cols - dashboard_length) / 2 + 1;
+    int y_pos = (rows - total) / 2 - 2;
     
     move(y_pos, x_pos);
 
@@ -610,7 +599,7 @@ static void draw_daily_progress(int rows, int cols, Habit *habits, int total, in
 static void main_screen(Habit *habits, int *total) {
     int highlight = 0;
     time_t now = time(NULL);
-    int real_today = localtime(&now)->tm_yday + debug_day;
+    int real_today = localtime(&now)->tm_yday;
     int view_day = real_today;
 
     while(1) {
@@ -618,12 +607,12 @@ static void main_screen(Habit *habits, int *total) {
         getmaxyx(stdscr, r, c);
         
         // Logical centering
-        int list_x = (c / 2) - (dashboard_length / 2);
-        int list_y = (r / 2) - (*total / 2);
+        int list_x = (c - dashboard_length) / 2;
+        int list_y = (r - *total) / 2;
 
         erase();
 
-        draw_daily_progress(r, c, habits, *total, view_day);
+        draw_status_bar(r, c, habits, *total, view_day);
 
 
         if(*total == 0)
@@ -639,6 +628,8 @@ static void main_screen(Habit *habits, int *total) {
 
         int ch = getch();
         switch(ch) {
+            case KEY_RESIZE:
+                break;
             case 'k':   
             case KEY_UP:
                 if(*total > 0) highlight = (highlight - 1 + *total) % *total; 
@@ -692,14 +683,25 @@ static void load_habits(Habit *habits, int *current_total) {
     FILE *from = fopen(HABITS_FILE, "r");
     if(!from) return;
     char line[512];
+    char fmt[64];
     int i = 0;
+
+    time_t now = time(NULL);
+    int current_year = localtime(&now)->tm_year + 1900;
+
+    snprintf(fmt, sizeof(fmt), " %%%d[^,],%%ld,%%d,%%s", name_max_length - 1);
     while(fgets(line, sizeof(line), from) && i < max_habits_amount) {
         char s[days_in_year + 1];
-        if(sscanf(line, " %49[^,],%ld,%s", habits[i].name, &habits[i].last_done, s) == habit_fields) {
-            for(int j = 0; j < days_in_year; j++)
-                habits[i].history[j] = (s[j] == '1');
+        if(sscanf(line, fmt, habits[i].name, &habits[i].last_done, &habits[i].year, s) == habit_fields) {
+            if(habits[i].year != current_year) {
+                memset(habits[i].history, 0, sizeof(habits[i].history));
+                habits[i].year = current_year;
+            } else
+                for(int j = 0; j < days_in_year; j++)
+                    habits[i].history[j] = (s[j] == '1');
             i++;
         }
+            
     }
     *current_total = i;
     fclose(from);
@@ -709,8 +711,8 @@ int main() {
     initscr();
     int r, c;
     getmaxyx(stdscr, r, c);
-    if(c < dashboard_length) {
-        printw("The width of the screen is not enough for this program to run properly. Press any key to terminate.");
+    if(c < action_bar_length) {
+        printw("The screen is not wide enough.\nPress any key to terminate.");
         getch();
         endwin();
         return 0;
