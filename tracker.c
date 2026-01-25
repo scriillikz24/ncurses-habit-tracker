@@ -6,15 +6,19 @@
 #include <time.h>
 
 #define HABITS_FILE ".habits.csv"
+#define ESC_HINT "<- Esc"
 
 // --- 1. Constants and Enums ---
 enum { 
     key_escape = 27, 
     key_enter = 10,
     default_timeout = 100, 
-    name_max_length = 30,
+    esc_hint_length = 6,
+    name_max_length = 25,
     checkbox_offset = 30,
     dashboard_length = 49,
+    calendar_length = 20,
+    calendar_height = 8,
     max_habits_amount = 5, 
     habit_fields = 3,
     bar_gap = 4,
@@ -104,9 +108,9 @@ static void draw_habit_item(int y, int x, int selected_yday, bool highlighted, H
     getyx(stdscr, cur_y, cur_x);
     
     // Fill remaining space with padding
-    while(cur_x < checkbox_start_col) {
-        addch(' ');
-        cur_x++;
+    if(checkbox_start_col > cur_x) {
+        hline(checkbox_start_col - cur_x, ' ');
+        move(cur_y, checkbox_start_col);
     }
 
     // Draw Checkboxes
@@ -181,7 +185,7 @@ static void add_habit(Habit *list, int *current_total) {
     getmaxyx(stdscr, rows, cols);
 
     int height = 3;
-    int width = name_max_length + 20;
+    int width = name_max_length + 25; // 25 chars for query text & <-Esc
     int start_y = (rows - height) / 2;
     int start_x = (cols - width) / 2;
 
@@ -191,7 +195,7 @@ static void add_habit(Habit *list, int *current_total) {
     box(win, 0, 0); 
 
     wattron(win, COLOR_PAIR(3));
-    mvwprintw(win, 1, width - 9, "(<- Esc)");
+    mvwprintw(win, 1, width - esc_hint_length - 1, ESC_HINT);
     wattroff(win, COLOR_PAIR(3));
     mvwprintw(win, 1, 1, "Your habit: ");
 
@@ -260,7 +264,7 @@ static void rename_habit(Habit *habit)
     getmaxyx(stdscr, rows, cols);
 
     int height = 5;
-    int width = name_max_length + 20;
+    int width = name_max_length + 23;
     int start_y = (rows - height) / 2;
     int start_x = (cols - width) / 2;
 
@@ -271,7 +275,7 @@ static void rename_habit(Habit *habit)
 
     mvwprintw(win, 1, 2, "Current name: %s", habit->name);
     wattron(win, COLOR_PAIR(3));
-    mvwprintw(win, 1, width - 9, "<- Esc");
+    mvwprintw(win, 1, width - esc_hint_length - 1, ESC_HINT);
     wattroff(win, COLOR_PAIR(3));
 
     mvwprintw(win, 3, 2, "New name: ");
@@ -359,7 +363,7 @@ static bool confirm_delete(const char *habit_name) {
     box(win, 0, 0); 
 
     wattron(win, COLOR_PAIR(3));
-    mvwprintw(win, 1, 2, "<- Esc");
+    mvwprintw(win, 1, 2, ESC_HINT);
     wattroff(win, COLOR_PAIR(3));
 
     // 4. Draw Content
@@ -504,7 +508,7 @@ static void draw_calendar(Habit *h) {
 
         // Footer
         attron(COLOR_PAIR(3));
-        mvprintw(start_y, start_x, "<- Esc");
+        mvprintw(start_y, start_x, ESC_HINT);
         attroff(COLOR_PAIR(3));
 
         int total_done = 0;
@@ -515,8 +519,9 @@ static void draw_calendar(Habit *h) {
         }
 
         attron(COLOR_PAIR(3));
-        mvprintw(start_y + 8, start_x, "--------------------");
-        mvprintw(start_y + 9, start_x, "Done: %d", total_done);
+        move(start_y + calendar_height, start_x);
+        hline('-', calendar_length);
+        mvprintw(start_y + calendar_height + 1, start_x, "Done: %d", total_done);
         attroff(COLOR_PAIR(3));
         refresh();
 
@@ -572,7 +577,7 @@ static void draw_daily_progress(int rows, int cols, Habit *habits, int total, in
     int filled_len = (int)((float)completed / total * bar_width);
 
     // 3. Draw the Bar
-    int x_pos = (cols / 2) - 24;
+    int x_pos = (cols / 2) - (dashboard_length / 2) + 1;
     int y_pos = (rows / 2) - (total / 2) - 2;
     
     move(y_pos, x_pos);
@@ -590,13 +595,13 @@ static void draw_daily_progress(int rows, int cols, Habit *habits, int total, in
     attroff(COLOR_PAIR(3));
 
     // 4. Draw Text Overlay (Centered)
-    char status[10];
+    char status[7];
     snprintf(status, sizeof(status), " %d%% ", (completed * 100) / total);
     
     if(completed != total) attron(COLOR_PAIR(3));
     else attron(COLOR_PAIR(9));
 
-    mvprintw(y_pos, (cols - strlen(status)) / 2, "%s", status);
+    mvprintw(y_pos, (cols - strlen(status)) / 2 + 1, "%s", status);
     
     if(completed == total) attroff(COLOR_PAIR(3));
     else attroff(COLOR_PAIR(9));
@@ -613,7 +618,7 @@ static void main_screen(Habit *habits, int *total) {
         getmaxyx(stdscr, r, c);
         
         // Logical centering
-        int list_x = (c / 2) - 25;
+        int list_x = (c / 2) - (dashboard_length / 2);
         int list_y = (r / 2) - (*total / 2);
 
         erase();
@@ -622,7 +627,7 @@ static void main_screen(Habit *habits, int *total) {
 
 
         if(*total == 0)
-            mvprintw(list_y, list_x, "No habits found. Press (1) to add.");
+            mvprintw(list_y, list_x, "No habits found. Press 1 to add.");
         else {
             print_week_labels(list_y - 1, list_x);
             for(int i = 0; i < *total; i++)
