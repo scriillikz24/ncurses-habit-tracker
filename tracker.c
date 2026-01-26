@@ -1,9 +1,12 @@
+#define _DEFAULT_SOURCE
 #include <curses.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
 #include <time.h>
+#include <limits.h>
+
 
 #define HABITS_FILE ".habits.csv"
 #define ESC_HINT "<- Esc"
@@ -20,6 +23,7 @@ enum {
     calendar_height = 8,
     action_bar_length = 57,
     max_habits_amount = 10,
+    colors_max = 256,
     habit_fields = 4,
     bar_gap = 4,
     days_in_year = 366,
@@ -68,6 +72,13 @@ static int get_streak(Habit habit, int today)
 
 }
 
+static void dimmed_attr(int *attr)
+{
+    *attr = COLOR_PAIR(3);
+    if(COLORS < colors_max)
+        *attr |= A_DIM;
+}
+
 static void draw_habit_item(int y, int x, int selected_yday, bool highlighted, Habit habit) {
     time_t now = time(NULL);
     int real_today = localtime(&now)->tm_yday;
@@ -77,14 +88,17 @@ static void draw_habit_item(int y, int x, int selected_yday, bool highlighted, H
 
     int streak = get_streak(habit, real_today);
 
+    int attr;
+    dimmed_attr(&attr);
+
     // --- IMPROVED STREAK UI START ---
     move(y, x);
 
     if (streak == 0) {
         // State: Inactive (Dimmed Dash)
-        attron(COLOR_PAIR(3)); 
+        attron(attr); 
         printw("  -  ");
-        attroff(COLOR_PAIR(3)); 
+        attroff(attr); 
     } 
     else if (streak < days_in_week) {
         // State: Spark (Yellow, standard weight)
@@ -100,9 +114,9 @@ static void draw_habit_item(int y, int x, int selected_yday, bool highlighted, H
     // --- IMPROVED STREAK UI END ---
 
     int cur_y, cur_x;
-    if(!highlighted) attron(COLOR_PAIR(3)); 
+    if(!highlighted) attron(attr); 
     printw("%s", habit.name);
-    if(!highlighted) attroff(COLOR_PAIR(3)); 
+    if(!highlighted) attroff(attr); 
 
     int checkbox_start_col = x + checkbox_offset;
     getyx(stdscr, cur_y, cur_x);
@@ -120,15 +134,61 @@ static void draw_habit_item(int y, int x, int selected_yday, bool highlighted, H
         
         char c = habit.history[history_idx] ? 'x' : '.';
         
-        int attr = (wd == target_column && highlighted) ? A_NORMAL : COLOR_PAIR(3);
+        if((wd == target_column) && highlighted)
+            attr = A_NORMAL;
+        else
+            dimmed_attr(&attr);
         attron(attr);
         printw(" %c ", c);
         attroff(attr);
     }
 }
 
+static void get_data_path(char *dest) {
+    const char *home = getenv("HOME");
+    if(home == NULL)
+        strncpy(dest, HABITS_FILE, PATH_MAX);
+    else
+        snprintf(dest, PATH_MAX, "%s/%s", home, HABITS_FILE);
+
+}
+
+static void load_habits(Habit *habits, int *current_total) {
+    char path[PATH_MAX];
+    get_data_path(path);
+
+    FILE *from = fopen(path, "r");
+    if(!from) return;
+    char line[512];
+    char fmt[64];
+    int i = 0;
+
+    time_t now = time(NULL);
+    int current_year = localtime(&now)->tm_year + 1900;
+
+    snprintf(fmt, sizeof(fmt), " %%%d[^,],%%ld,%%d,%%s", name_max_length - 1);
+    while(fgets(line, sizeof(line), from) && i < max_habits_amount) {
+        char s[days_in_year + 1];
+        if(sscanf(line, fmt, habits[i].name, &habits[i].last_done, &habits[i].year, s) == habit_fields) {
+            if(habits[i].year != current_year) {
+                memset(habits[i].history, 0, sizeof(habits[i].history));
+                habits[i].year = current_year;
+            } else
+                for(int j = 0; j < days_in_year; j++)
+                    habits[i].history[j] = (s[j] == '1');
+            i++;
+        }
+            
+    }
+    *current_total = i;
+    fclose(from);
+}
+
 static void upload_to_disk(Habit *habits, int current_total) {
-    FILE *dest = fopen(HABITS_FILE, "w");
+    char path[PATH_MAX];
+    get_data_path(path);
+
+    FILE *dest = fopen(path, "w");
     if(!dest) return;
 
     for(int i = 0; i < current_total; i++) {
@@ -165,10 +225,12 @@ static void action_bar(int rows, int cols)
     int y_pos = rows - 2;
 
     // Draw a background strip for the menu
-    attron(COLOR_PAIR(3));
+    int attr;
+    dimmed_attr(&attr);
+    attron(attr); 
     mvhline(y_pos - 1, 0, ACS_HLINE, cols); 
     mvhline(y_pos + 1, 0, ACS_HLINE, cols); 
-    attroff(COLOR_PAIR(3));
+    attroff(attron(attr)); 
     
     for(int i = 0; i < menu_count; i++) {
         mvaddstr(y_pos, x_offset, menu_items[i]);
@@ -239,9 +301,11 @@ static void add_habit(Habit *list, int *current_total) {
     
     box(win, 0, 0); 
 
-    wattron(win, COLOR_PAIR(3));
+    int attr;
+    dimmed_attr(&attr);
+    wattron(win, attr); 
     mvwprintw(win, 1, width - esc_hint_length - 1, ESC_HINT);
-    wattroff(win, COLOR_PAIR(3));
+    wattroff(win, attron(attr)); 
 
     char temp_name[name_max_length] = {0};
     
@@ -292,9 +356,11 @@ static void rename_habit(Habit *habit)
     
     box(win, 0, 0); 
 
-    wattron(win, COLOR_PAIR(3));
+    int attr;
+    dimmed_attr(&attr);
+    wattron(win, attr); 
     mvwprintw(win, 1, width - esc_hint_length - 1, ESC_HINT);
-    wattroff(win, COLOR_PAIR(3));
+    wattroff(win, attron(attr)); 
     wrefresh(win);
 
     char temp_name[name_max_length] = {0};
@@ -321,16 +387,19 @@ static void print_week_labels(int y, int x)
     const char days[] = {'S', 'M', 'T', 'W', 'T', 'F', 'S'};
 
     move(y, x + checkbox_offset);
-    attron(COLOR_PAIR(3));
+
+    int attr;
+    dimmed_attr(&attr);
+    attron(attr); 
     for(int i = 0; i < days_in_week; i++) {
         if(i == days_in_week - 1) {
-            attroff(COLOR_PAIR(3));
+            attroff(attr); 
         }
         int idx = (today_wday - 
                 (days_in_week - 1 - i) + days_in_week) % days_in_week;
         printw(" %c ", days[idx]);
         if(i == days_in_week - 1) {
-            attron(COLOR_PAIR(3));
+            attron(attr);
         }
     }
 }
@@ -351,19 +420,21 @@ static bool confirm_delete(const char *habit_name) {
     
     box(win, 0, 0); 
 
-    wattron(win, COLOR_PAIR(3));
+    int attr;
+    dimmed_attr(&attr);
+    wattron(win, attr); 
     mvwprintw(win, 1, 2, ESC_HINT);
-    wattroff(win, COLOR_PAIR(3));
+    wattroff(win, attr); 
 
     // 4. Draw Content
     wattron(win, A_BOLD);
     mvwprintw(win, 1, (width - 14) / 2, " CONFIRMATION "); // 14 here is the length of the string passed
     wattroff(win, A_BOLD);
 
-    wattron(win, COLOR_PAIR(3));
+    wattron(win, attr); 
     mvwprintw(win, 3, (width - 32) / 2,
             "Are you sure you want to delete:"); // 32 is the length of the string
-    wattroff(win, COLOR_PAIR(3));
+    wattroff(win, attr); 
     
     // Highlight the habit name in Red to show it's the target of deletion
     mvwprintw(win, 4, (width - strlen(habit_name) - 2) / 2, "'%s'?", habit_name);
@@ -371,9 +442,9 @@ static bool confirm_delete(const char *habit_name) {
     // Drawing "Buttons"
     int btn_y = 6;
     
-    wattron(win, COLOR_PAIR(3));
+    wattron(win, attr);
     mvwaddstr(win, btn_y, (width / 2) - 10, "[Y]es");
-    wattroff(win, COLOR_PAIR(3));
+    wattroff(win, attr);
 
     mvwaddstr(win, btn_y, (width / 2) + 5, "[N]o");
 
@@ -440,9 +511,11 @@ static void draw_calendar(Habit *h) {
 
         // 5. Draw Header
         mvprintw(start_y, start_x + 8, "%s %d", months[current_month], current_year);
-        attron(COLOR_PAIR(3));
+        int attr;
+        dimmed_attr(&attr);
+        attron(attr);
         mvprintw(start_y + 2, start_x + 1, "S  M  T  W  T  F  S");
-        attroff(COLOR_PAIR(3));
+        attroff(attr);
 
         // 6. Draw Days
         int row = 0;
@@ -458,6 +531,7 @@ static void draw_calendar(Habit *h) {
             bool to_view = (day == view_day);
             bool is_real_today = (day == real_today);
 
+            int attr;
             if(to_view && is_real_today && is_done)
                 attron(COLOR_PAIR(4));
             else if(to_view && is_real_today) 
@@ -472,8 +546,10 @@ static void draw_calendar(Habit *h) {
                 attron(A_REVERSE); // Just Highlighted
             else if (is_done)
                 attron(A_NORMAL); // Cyan text
-            else
-                attron(COLOR_PAIR(3));
+            else {
+                dimmed_attr(&attr);
+                attron(attr);
+            }
 
             mvprintw(ui_y, ui_x, "%2d", day);
 
@@ -485,7 +561,7 @@ static void draw_calendar(Habit *h) {
             else if (to_view && is_done) attroff(A_REVERSE | COLOR_PAIR(2));
             else if (to_view) attroff(A_REVERSE);
             else if (is_done) attroff(COLOR_PAIR(2));
-            else attroff(COLOR_PAIR(3));
+            else attroff(attr);
 
             // Move to next column
             col++;
@@ -496,9 +572,9 @@ static void draw_calendar(Habit *h) {
         }
 
         // Footer
-        attron(COLOR_PAIR(3));
+        attron(attr);
         mvprintw(start_y, start_x, ESC_HINT);
-        attroff(COLOR_PAIR(3));
+        attroff(attr);
 
         int total_done = 0;
         for(int day = 1; day <= days_in_month; day++) {
@@ -506,12 +582,12 @@ static void draw_calendar(Habit *h) {
             if(h->history[history_idx])
                 total_done++;
         }
-
-        attron(COLOR_PAIR(3));
+        
+        attron(attr);
         move(start_y + calendar_height, start_x);
         hline('-', calendar_length);
         mvprintw(start_y + calendar_height + 1, start_x, "Done: %d", total_done);
-        attroff(COLOR_PAIR(3));
+        attroff(attr);
         refresh();
 
         int ch = getch();
@@ -578,21 +654,23 @@ static void draw_status_bar(int rows, int cols, Habit *habits, int total, int vi
     attroff(COLOR_PAIR(9));
 
     // Draw Empty Portion (Dimmed)
-    attron(COLOR_PAIR(3)); 
+    int attr;
+    dimmed_attr(&attr);
+    attron(attr);
     for (int i = filled_len; i < bar_width; i++)
         addch('-');
-    attroff(COLOR_PAIR(3));
+    attroff(attr);
 
     // 4. Draw Text Overlay (Centered)
     char status[7];
     snprintf(status, sizeof(status), " %d%% ", (completed * 100) / total);
     
-    if(completed != total) attron(COLOR_PAIR(3));
+    if(completed != total) attron(attr);
     else attron(COLOR_PAIR(9));
 
     mvprintw(y_pos, (cols - strlen(status)) / 2 + 1, "%s", status);
     
-    if(completed == total) attroff(COLOR_PAIR(3));
+    if(completed != total) attroff(attr);
     else attroff(COLOR_PAIR(9));
 }
 
@@ -605,15 +683,27 @@ static void main_screen(Habit *habits, int *total) {
     while(1) {
         int r, c;
         getmaxyx(stdscr, r, c);
+
+        // The Safety Check
+        if(c < action_bar_length || r < (*total + 10)) {
+            erase();
+            mvprintw(r/2, (c - 20) / 2, "Terminal too small!");
+            mvprintw(r/2 + 1, (c - 22) / 2, "Please resize window.");
+            refresh();
+
+            int ch = getch();
+            if(ch == 'q' || ch == key_escape) {
+                upload_to_disk(habits, *total);
+                return;
+            }
+            continue;
+        }
         
-        // Logical centering
+        erase();
         int list_x = (c - dashboard_length) / 2;
         int list_y = (r - *total) / 2;
 
-        erase();
-
         draw_status_bar(r, c, habits, *total, view_day);
-
 
         if(*total == 0)
             mvprintw(list_y, list_x, "No habits found. Press 1 to add.");
@@ -679,57 +769,42 @@ static void main_screen(Habit *habits, int *total) {
     }
 }
 
-static void load_habits(Habit *habits, int *current_total) {
-    FILE *from = fopen(HABITS_FILE, "r");
-    if(!from) return;
-    char line[512];
-    char fmt[64];
-    int i = 0;
 
-    time_t now = time(NULL);
-    int current_year = localtime(&now)->tm_year + 1900;
+static void init_colors()
+{
+    if(!has_colors)
+        return;
 
-    snprintf(fmt, sizeof(fmt), " %%%d[^,],%%ld,%%d,%%s", name_max_length - 1);
-    while(fgets(line, sizeof(line), from) && i < max_habits_amount) {
-        char s[days_in_year + 1];
-        if(sscanf(line, fmt, habits[i].name, &habits[i].last_done, &habits[i].year, s) == habit_fields) {
-            if(habits[i].year != current_year) {
-                memset(habits[i].history, 0, sizeof(habits[i].history));
-                habits[i].year = current_year;
-            } else
-                for(int j = 0; j < days_in_year; j++)
-                    habits[i].history[j] = (s[j] == '1');
-            i++;
-        }
-            
+    start_color();
+
+    init_pair(1, COLOR_GREEN, COLOR_WHITE); 
+    init_pair(2, COLOR_GREEN, COLOR_BLACK);
+    init_pair(5, COLOR_RED, COLOR_BLACK);
+    init_pair(6, COLOR_YELLOW, COLOR_BLACK);
+
+    // High-Definition vs. Fallback Pairs
+    if(COLORS >= colors_max) {
+        init_pair(3, 242, COLOR_BLACK); // Dimmed grey
+        init_pair(4, COLOR_GREEN, 242);
+        init_pair(7, COLOR_RED, 242);
+        init_pair(8, COLOR_WHITE, 242);
+        init_pair(9, 250, COLOR_BLACK); // Light grey
+    } else {
+        // Fallback for 8/16 color terminals (e.g., standard macOS Terminal)
+        init_pair(3, COLOR_WHITE, COLOR_BLACK); // Use white... 
+        init_pair(4, COLOR_GREEN, COLOR_WHITE);
+        init_pair(7, COLOR_RED, COLOR_WHITE);
+        init_pair(8, COLOR_BLACK, COLOR_WHITE);
+        init_pair(9, COLOR_WHITE, COLOR_BLACK);
     }
-    *current_total = i;
-    fclose(from);
 }
 
 int main() {
     initscr();
-    int r, c;
-    getmaxyx(stdscr, r, c);
-    if(c < action_bar_length) {
-        printw("The screen is not wide enough.\nPress any key to terminate.");
-        getch();
-        endwin();
-        return 0;
-    }
     cbreak();
     noecho();
     keypad(stdscr, 1);
-    start_color();
-    init_pair(1, COLOR_GREEN, COLOR_WHITE); 
-    init_pair(2, COLOR_GREEN, COLOR_BLACK);
-    init_pair(3, 242, COLOR_BLACK); // Dimmed text
-    init_pair(4, COLOR_GREEN, 242);
-    init_pair(5, COLOR_RED, COLOR_BLACK);
-    init_pair(6, COLOR_YELLOW, COLOR_BLACK);
-    init_pair(7, COLOR_RED, 242);
-    init_pair(8, COLOR_WHITE, 242);
-    init_pair(9, 250, COLOR_BLACK);
+    init_colors();
     curs_set(0);
 
     int total = 0;
