@@ -7,11 +7,12 @@
 #include <time.h>
 #include <limits.h>
 
-
+#ifndef PATH_MAX
+    #define PATH_MAX 4096
+#endif
 #define HABITS_FILE ".habits.csv"
 #define ESC_HINT "<- Esc"
 
-// --- 1. Constants and Enums ---
 enum { 
     key_escape = 27, 
     key_enter = 10,
@@ -39,8 +40,6 @@ enum menu_indices {
     idx_quit,
     menu_count
 };
-
-// --- 2. Type Definitions ---
 
 typedef struct Habit {
     char name[name_max_length];
@@ -160,13 +159,17 @@ static void load_habits(Habit *habits, int *current_total) {
     FILE *from = fopen(path, "r");
     if(!from) return;
     char line[512];
-    char fmt[64];
     int i = 0;
+
+    char fmt[64];
+    char s_fmt[20];
 
     time_t now = time(NULL);
     int current_year = localtime(&now)->tm_year + 1900;
 
-    snprintf(fmt, sizeof(fmt), " %%%d[^,],%%ld,%%d,%%s", name_max_length - 1);
+    snprintf(s_fmt, sizeof(s_fmt), "%%%ds", days_in_year);
+    snprintf(fmt, sizeof(fmt), " %%%d[^,],%%ld,%%d,%s", name_max_length - 1, s_fmt);
+
     while(fgets(line, sizeof(line), from) && i < max_habits_amount) {
         char s[days_in_year + 1];
         if(sscanf(line, fmt, habits[i].name, &habits[i].last_done, &habits[i].year, s) == habit_fields) {
@@ -192,17 +195,13 @@ static void upload_to_disk(Habit *habits, int current_total) {
     if(!dest) return;
 
     for(int i = 0; i < current_total; i++) {
-        char s[days_in_year + 1];
-        //memset(s, '0', days_in_year);
-        for(int j = 0; j < days_in_year; j++)
-            s[j] = habits[i].history[j] ? '1' : '0';
-        s[days_in_year] = '\0';
-
-        fprintf(dest, "%s,%ld,%d,%s\n", 
+        fprintf(dest, "%s,%ld,%d,", 
                 habits[i].name, 
                 habits[i].last_done, 
-                habits[i].year,
-                s);
+                habits[i].year);
+        for(int j = 0; j < days_in_year; j++)
+            fputc(habits[i].history[j] ? '1' : '0', dest);
+        fputc('\n', dest);
     }
     fclose(dest);
 }
@@ -730,7 +729,7 @@ static void main_screen(Habit *habits, int *total) {
                 break;
             case 'h': 
             case KEY_LEFT:
-                if(view_day > real_today - 6) view_day--; 
+                if(view_day > real_today - (days_in_week - 1)) view_day--; 
                 break;
             case 'l': 
             case KEY_RIGHT:
@@ -769,10 +768,9 @@ static void main_screen(Habit *habits, int *total) {
     }
 }
 
-
 static void init_colors()
 {
-    if(!has_colors)
+    if(!has_colors())
         return;
 
     start_color();
