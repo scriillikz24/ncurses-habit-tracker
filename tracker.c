@@ -479,7 +479,6 @@ static void draw_calendar(Habit *h) {
     int current_month = t->tm_mon; // 0-11
     int current_year = t->tm_year + 1900;
     int real_today = t->tm_mday;
-    int view_day = real_today;
 
     // 2. Find out when the 1st of the month starts
     struct tm first_val = *t;
@@ -497,7 +496,11 @@ static void draw_calendar(Habit *h) {
     mktime(&last_val);
     int days_in_month = last_val.tm_mday;
 
+    struct tm view_day = *t;
+
     while(1) {
+        mktime(&view_day);
+
         // 4. UI Setup
         int rows, cols;
         getmaxyx(stdscr, rows, cols);
@@ -509,11 +512,17 @@ static void draw_calendar(Habit *h) {
         int start_y = (rows - 10) / 2;
 
         // 5. Draw Header
+        attron(COLOR_PAIR(10));
         mvprintw(start_y, start_x + 8, "%s %d", months[current_month], current_year);
+        attroff(COLOR_PAIR(10));
+
+        mvprintw(0, 0, "VIEW MDAY: %d", view_day.tm_mday);
+        mvprintw(1, 0, "VIEW YDAY: %d", view_day.tm_yday);
+
         int attr;
         dimmed_attr(&attr);
         attron(attr);
-        mvprintw(start_y + 2, start_x + 1, "S  M  T  W  T  F  S");
+        mvaddstr(start_y + 2, start_x + 1, "S  M  T  W  T  F  S");
         attroff(attr);
 
         // 6. Draw Days
@@ -527,7 +536,7 @@ static void draw_calendar(Habit *h) {
 
             // Determine Color
             bool is_done = h->history[history_idx];
-            bool to_view = (day == view_day);
+            bool to_view = (day == view_day.tm_mday);
             bool is_real_today = (day == real_today);
 
             int attr;
@@ -593,24 +602,24 @@ static void draw_calendar(Habit *h) {
         switch(ch) {
             case 'k':   
             case KEY_UP:
-                if(view_day - days_in_week >= 1) view_day -= days_in_week;
+                if(view_day.tm_mday - days_in_week >= 1) view_day.tm_mday -= days_in_week;
                 break;
             case 'j': 
             case KEY_DOWN:
-                if(view_day + days_in_week <= days_in_month) view_day += days_in_week;
+                if(view_day.tm_mday + days_in_week <= days_in_month) view_day.tm_mday += days_in_week;
                 break;
             case 'h': 
             case KEY_LEFT:
-                view_day = (view_day - 1 + days_in_month) % days_in_month;
-                if(!view_day) view_day = days_in_month;
+                view_day.tm_mday = (view_day.tm_mday - 1 + days_in_month) % days_in_month;
+                if(!view_day.tm_mday) view_day.tm_mday = days_in_month;
                 break;
             case 'l': 
             case KEY_RIGHT:
-                view_day = (view_day + 1) % days_in_month;
-                if(!view_day) view_day = days_in_month;
+                view_day.tm_mday = (view_day.tm_mday + 1) % days_in_month;
+                if(!view_day.tm_mday) view_day.tm_mday = days_in_month;
                 break;
             case key_enter:
-                mark_habit_done(h, view_day - 1); 
+                mark_habit_done(h, view_day.tm_yday); 
                 break;
             case key_escape: 
                 return;
@@ -779,6 +788,7 @@ static void init_colors()
     init_pair(2, COLOR_GREEN, COLOR_BLACK);
     init_pair(5, COLOR_RED, COLOR_BLACK);
     init_pair(6, COLOR_YELLOW, COLOR_BLACK);
+    init_pair(10, COLOR_WHITE, COLOR_BLACK);
 
     // High-Definition vs. Fallback Pairs
     if(COLORS >= colors_max) {
