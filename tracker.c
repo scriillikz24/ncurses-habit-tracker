@@ -21,15 +21,17 @@ enum {
     checkbox_offset = 30,
     dashboard_length = 49,
     calendar_length = 20,
-    calendar_height = 8,
+    calendar_height = 9,
     action_bar_length = 57,
     max_habits_amount = 10,
     colors_max = 256,
     habit_fields = 4,
     bar_gap = 4,
+    months_in_year = 12,
     days_in_year = 366,
     days_in_week = 7,
     weeks_in_year = 53,
+    themes_count = 2,
 };
 
 enum menu_indices {
@@ -37,6 +39,7 @@ enum menu_indices {
     idx_delete,
     idx_rename,
     idx_calendar,
+    idx_themes,
     idx_quit,
     menu_count
 };
@@ -68,7 +71,6 @@ static int get_streak(Habit habit, int today)
         else break;
     }
     return today - day;
-
 }
 
 static void dimmed_attr(int *attr)
@@ -149,7 +151,6 @@ static void get_data_path(char *dest) {
         strncpy(dest, HABITS_FILE, PATH_MAX);
     else
         snprintf(dest, PATH_MAX, "%s/%s", home, HABITS_FILE);
-
 }
 
 static void load_habits(Habit *habits, int *current_total) {
@@ -213,7 +214,8 @@ static void action_bar(int rows, int cols)
         "2 Delete",
         "3 Rename",
         "4 Calendar",
-        "5 Quit"
+        "5 Themes",
+        "6 Quit"
     };
     int total_width = 0;
     for(int i = 0; i < menu_count; i++) 
@@ -466,7 +468,67 @@ static bool confirm_delete(const char *habit_name) {
     return result;
 }
 
+static void color_themes() {
+    timeout(-1);
+
+    int cols, rows;
+    getmaxyx(stdscr, rows, cols);
+
+    static const char *col_themes[themes_count] = {
+        "Classic",
+        "Colors"
+    };
+
+    int total_width = 0;
+    for(int i = 0; i < themes_count; i++) 
+        total_width += strlen(col_themes[i]) + bar_gap;
+
+    // Center the bar at the bottom of the screen
+    int highlighted = 0;
+    while(1) {
+        int x_offset = (cols - total_width + bar_gap) / 2;
+        int y_pos = rows - 2;
+
+        // Draw a background strip for the menu
+        int attr;
+        dimmed_attr(&attr);
+        attron(attr); 
+        mvhline(y_pos, 0, ' ', cols);
+        attroff(attron(attr)); 
+
+        // Draw the color schemes' names
+        for(int i = 0; i < themes_count; i++) {
+            if(i == highlighted)
+                attron(COLOR_PAIR(10));
+            mvaddstr(y_pos, x_offset, col_themes[i]);
+            if(i == highlighted) {
+                attroff(COLOR_PAIR(10));
+                attron(attr);
+            }
+            x_offset += strlen(col_themes[i]) + bar_gap;
+        }
+
+        int ch;
+        ch = getch();
+        switch(ch) {
+            case KEY_RIGHT:
+            case 'l':
+                highlighted = (highlighted + 1) % themes_count;
+                break;
+            case KEY_LEFT:
+            case 'h':
+                highlighted = (highlighted - 1 + themes_count) % themes_count;
+                break;
+            case key_escape:
+                return;
+            case key_enter:
+                return;
+        }
+    }
+}
+
 static void draw_calendar(Habit *h) {
+    timeout(-1);
     // 1. Setup Time Data
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
@@ -475,37 +537,37 @@ static void draw_calendar(Habit *h) {
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December"
 };
-
-    int current_month = t->tm_mon; // 0-11
-    int current_year = t->tm_year + 1900;
+    int view_month = t->tm_mon; // 0-11
+    int view_year = t->tm_year + 1900;
     int real_today = t->tm_mday;
-
-    // 2. Find out when the 1st of the month starts
-    struct tm first_val = *t;
-    first_val.tm_mday = 1;
-    mktime(&first_val); // This auto-calculates wday and yday for the 1st
-
-    int start_wday = first_val.tm_wday; // 0=Sun, 1=Mon...
-    int start_yday = first_val.tm_yday; // 0-365 index in your history array
-
-    // 3. Find days in this month
-    // Trick: Go to day "0" of next month to find last day of current month
-    struct tm last_val = *t;
-    last_val.tm_mon++;     // Next month
-    last_val.tm_mday = 0;  // "0th" day of next month is last day of this month
-    mktime(&last_val);
-    int days_in_month = last_val.tm_mday;
+    int real_month = view_month;
+    int real_year = view_year;
 
     struct tm view_day = *t;
-
     while(1) {
+        // 2. Find out when the 1st of the month starts
+        struct tm first_val = view_day;
+        first_val.tm_mday = 1;
+        mktime(&first_val); // This auto-calculates wday and yday for the 1st
+
+        int start_wday = first_val.tm_wday; // 0=Sun, 1=Mon...
+        int start_yday = first_val.tm_yday; // 0-365 index in your history array
+
+        // 3. Find days in this month
+        // Trick: Go to day "0" of next month to find last day of current month
+        struct tm last_val = view_day;
+        last_val.tm_mon++;     // Next month
+        last_val.tm_mday = 0;  // "0th" day of next month is last day of this month
+        mktime(&last_val);
+        int days_in_month = last_val.tm_mday;
+
         mktime(&view_day);
 
         // 4. UI Setup
         int rows, cols;
         getmaxyx(stdscr, rows, cols);
         erase(); // Clear screen
-
+                 
         // Calculate centering
         // Calendar is roughly 20 chars wide (7 days * 3 chars)
         int start_x = (cols - 22) / 2; 
@@ -513,11 +575,11 @@ static void draw_calendar(Habit *h) {
 
         // 5. Draw Header
         attron(COLOR_PAIR(10));
-        mvprintw(start_y, start_x + 8, "%s %d", months[current_month], current_year);
+        attron(A_BOLD);
+        mvprintw(start_y - 2, start_x, "'%s'", h->name);
+        attroff(A_BOLD);
+        mvprintw(start_y, start_x + 8, "%s %d", months[view_month], view_year);
         attroff(COLOR_PAIR(10));
-
-        mvprintw(0, 0, "VIEW MDAY: %d", view_day.tm_mday);
-        mvprintw(1, 0, "VIEW YDAY: %d", view_day.tm_yday);
 
         int attr;
         dimmed_attr(&attr);
@@ -537,7 +599,9 @@ static void draw_calendar(Habit *h) {
             // Determine Color
             bool is_done = h->history[history_idx];
             bool to_view = (day == view_day.tm_mday);
-            bool is_real_today = (day == real_today);
+            bool is_real_today = (day == real_today &&
+                    view_day.tm_year == (real_year - 1900) &&
+                    view_day.tm_mon == real_month);
 
             int attr;
             if(to_view && is_real_today && is_done)
@@ -594,7 +658,7 @@ static void draw_calendar(Habit *h) {
         attron(attr);
         move(start_y + calendar_height, start_x);
         hline('-', calendar_length);
-        mvprintw(start_y + calendar_height + 1, start_x, "Done: %d", total_done);
+        mvprintw(start_y + calendar_height + 1, start_x, "Completed: %d/%d", total_done, days_in_month);
         attroff(attr);
         refresh();
 
@@ -618,13 +682,29 @@ static void draw_calendar(Habit *h) {
                 view_day.tm_mday = (view_day.tm_mday + 1) % days_in_month;
                 if(!view_day.tm_mday) view_day.tm_mday = days_in_month;
                 break;
+            case 'b':
+                if((view_month - 1) < 0)
+                    view_year--;
+                view_month = (view_month - 1 + months_in_year) % months_in_year;
+                view_day.tm_mon = view_month;
+                view_day.tm_year = view_year - 1900;
+                break;
+            case 'f':
+                if((view_month + 1) >= months_in_year)
+                    view_year++;
+                view_month = (view_month + 1) % months_in_year;
+                view_day.tm_mon = view_month;
+                view_day.tm_year = view_year - 1900;
+                break;
             case key_enter:
                 mark_habit_done(h, view_day.tm_yday); 
                 break;
             case key_escape: 
+                timeout(0);
                 return;
         }
     }
+    timeout(0);
 }
 
 static void draw_status_bar(int rows, int cols, Habit *habits, int total, int view_day) {
@@ -767,7 +847,11 @@ static void main_screen(Habit *habits, int *total) {
             case 'c':
                 if(*total > 0) draw_calendar(&habits[highlight]);
                 break;
-            case '5': 
+            case '5':
+            case 't':
+                color_themes();
+                break;
+            case '6': 
             case 'q':
             case key_escape:
                 upload_to_disk(habits, *total);
