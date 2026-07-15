@@ -33,7 +33,7 @@ enum {
     days_in_week = 7,
     weeks_in_year = 53,
     themes_count = 2,
-    side_bar_ratio = 10 // The part of the whole screen it takes in percents (10%)
+    side_bar_ratio = 15, // The part of the whole screen it takes in percents
 };
 
 enum action_bar_indices {
@@ -46,8 +46,8 @@ enum action_bar_indices {
 };
 
 enum side_bar_indices {
-    idx_themes = 0,
-    idx_quit2,
+    idx_schemes = 0,
+    idx_configs,
     side_bar_menu_count
 };
 
@@ -475,7 +475,7 @@ static bool confirm_delete(const char *habit_name) {
     return result;
 }
 
-static void color_themes() {
+static void color_themes(int sd_bar_len) {
     timeout(-1);
 
     int cols, rows;
@@ -493,17 +493,17 @@ static void color_themes() {
     // Center the bar at the bottom of the screen
     int highlighted = 0;
     while(1) {
-        int x_offset = (cols - total_width + bar_gap) / 2;
+        int x_offset = (cols - total_width + bar_gap + sd_bar_len) / 2;
         int y_pos = rows - 2;
 
         // Draw a background strip for the menu
         int attr;
         dimmed_attr(&attr);
         attron(attr); 
-        mvhline(y_pos, 0, ' ', cols);
+        mvhline(y_pos, sd_bar_len + 1, ' ', cols - sd_bar_len);
         attroff(attron(attr)); 
 
-        // Draw the color schemes' names
+        // Draw the item names
         for(int i = 0; i < themes_count; i++) {
             if(i == highlighted)
                 attron(COLOR_PAIR(10));
@@ -775,14 +775,22 @@ static int get_side_bar_len(int cols)
     return cols * (side_bar_ratio / 100.0);
 }
 
+static void side_bar_perform(int option, int side_bar_len)
+{
+    switch(option) {
+    case 0:
+    case 't':
+        color_themes(side_bar_len);
+        return;
+    }
+}
+
 static void draw_side_bar(int rows, int len,
         int is_called) {
     static const char *menu_items[side_bar_menu_count] = {
-        "Themes",
-        "Quit"
+        "1.Color Schemes",
+        "2.Configs"
     };
-    int y_pos = 0;
-    int x_pos = 0;
 
     // Set up colors
     int attr;
@@ -793,21 +801,29 @@ static void draw_side_bar(int rows, int len,
         attron(COLOR_PAIR(10));
     else
         attron(attr); // dimmed otherwise
-    for(int i = 0; i < rows; i++)
+    for(int i = 0; i < rows; i++) {
         mvaddch(i, len, '|');
+        if(i == 0 || i + 1 == rows)
+            mvaddch(i, len, '+');
+    }
 
+    // Draw top and bottom lines
+    mvhline(0, 0, '-', len); 
+    mvhline(rows - 1, 0, '-', len); 
+
+    // Draw inactive menu items
     if(is_called)
         attron(attr);
     attron(A_BOLD);
     for(int i = 0; i < side_bar_menu_count; i++)
-        mvaddstr(y_pos + i, x_pos, menu_items[i]);
+        mvaddstr(i + 1, 0, menu_items[i]);
     attroff(A_BOLD);
 
     if(!is_called)
         return;
     int highlighted = 0;
     while(1) {
-        // Draw menu items
+        // Draw active menu items
         attron(A_BOLD);
         for(int i = 0; i < side_bar_menu_count; i++) {
             int ch;
@@ -818,7 +834,8 @@ static void draw_side_bar(int rows, int len,
             }
             else
                 ch = ' ';
-            mvprintw(y_pos + i, x_pos, "%c %s", ch, menu_items[i]);
+            mvprintw(i + 1, 0,
+                    "%c %s", ch, menu_items[i]);
             if(i == highlighted) {
                 attroff(COLOR_PAIR(10));
                 attron(attr);
@@ -838,7 +855,10 @@ static void draw_side_bar(int rows, int len,
                 % side_bar_menu_count;
             break;
         case key_enter:
+            side_bar_perform(highlighted, len);
+            return;
         case key_tab:
+        case key_escape:
             return;
         }
     }

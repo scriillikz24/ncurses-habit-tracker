@@ -1,5 +1,7 @@
 # Ignore the compiled executable
 habits
+to-do.txt
 
 .*
 !.gitignore
+
