@@ -16,6 +16,7 @@
 enum { 
     key_escape = 27, 
     key_enter = 10,
+    key_tab = 9,
     esc_hint_length = 6,
     name_max_length = 25,
     checkbox_offset = 30,
@@ -32,16 +33,22 @@ enum {
     days_in_week = 7,
     weeks_in_year = 53,
     themes_count = 2,
+    side_bar_ratio = 10 // The part of the whole screen it takes in percents (10%)
 };
 
-enum menu_indices {
+enum action_bar_indices {
     idx_add = 0,
     idx_delete,
     idx_rename,
     idx_calendar,
-    idx_themes,
     idx_quit,
-    menu_count
+    action_bar_menu_count
+};
+
+enum side_bar_indices {
+    idx_themes = 0,
+    idx_quit2,
+    side_bar_menu_count
 };
 
 typedef struct Habit {
@@ -207,33 +214,33 @@ static void upload_to_disk(Habit *habits, int current_total) {
     fclose(dest);
 }
 
-static void action_bar(int rows, int cols)
+static void action_bar(int rows, int cols, int start_x)
 {
-    static const char *menu_items[menu_count] = {
+    static const char *menu_items[action_bar_menu_count] = {
         "1 Add",
         "2 Delete",
         "3 Rename",
         "4 Calendar",
-        "5 Themes",
-        "6 Quit"
+        "5 Quit"
     };
     int total_width = 0;
-    for(int i = 0; i < menu_count; i++) 
+    for(int i = 0; i < action_bar_menu_count; i++) 
         total_width += strlen(menu_items[i]) + bar_gap;
 
     // Center the bar at the bottom of the screen
-    int x_offset = (cols - total_width + bar_gap) / 2;
+    int x_offset = (cols - total_width + bar_gap) / 2 + start_x / 2;
     int y_pos = rows - 2;
 
     // Draw a background strip for the menu
     int attr;
     dimmed_attr(&attr);
     attron(attr); 
-    mvhline(y_pos - 1, 0, ACS_HLINE, cols); 
-    mvhline(y_pos + 1, 0, ACS_HLINE, cols); 
+    mvhline(y_pos - 1, start_x + 1, ACS_HLINE, cols - start_x - 1); 
+    mvhline(y_pos + 1, start_x + 1, ACS_HLINE, cols - start_x - 1); 
     attroff(attron(attr)); 
     
-    for(int i = 0; i < menu_count; i++) {
+    // Draw menu items
+    for(int i = 0; i < action_bar_menu_count; i++) {
         mvaddstr(y_pos, x_offset, menu_items[i]);
         x_offset += strlen(menu_items[i]) + bar_gap;
     }
@@ -707,7 +714,8 @@ static void draw_calendar(Habit *h) {
     timeout(0);
 }
 
-static void draw_status_bar(int rows, int cols, Habit *habits, int total, int view_day) {
+static void draw_status_bar(int rows, int cols,
+        int start_x, Habit *habits, int total, int view_day) {
     if (total == 0) return; // Prevent division by zero
 
     // 1. Calculate counts
@@ -730,7 +738,7 @@ static void draw_status_bar(int rows, int cols, Habit *habits, int total, int vi
     int filled_len = (int)((float)completed / total * bar_width);
 
     // 3. Draw the Bar
-    int x_pos = (cols - dashboard_length) / 2 + 1;
+    int x_pos = (cols - dashboard_length) / 2 + start_x / 2 + 1;
     int y_pos = (rows - total) / 2 - 2;
     
     move(y_pos, x_pos);
@@ -756,10 +764,85 @@ static void draw_status_bar(int rows, int cols, Habit *habits, int total, int vi
     if(completed != total) attron(attr);
     else attron(COLOR_PAIR(9));
 
-    mvprintw(y_pos, (cols - strlen(status)) / 2 + 1, "%s", status);
+    mvprintw(y_pos, (cols - strlen(status)) / 2 + start_x / 2 + 1, "%s", status);
     
     if(completed != total) attroff(attr);
     else attroff(COLOR_PAIR(9));
+}
+
+static int get_side_bar_len(int cols)
+{
+    return cols * (side_bar_ratio / 100.0);
+}
+
+static void draw_side_bar(int rows, int len,
+        int is_called) {
+    static const char *menu_items[side_bar_menu_count] = {
+        "Themes",
+        "Quit"
+    };
+    int y_pos = 0;
+    int x_pos = 0;
+
+    // Set up colors
+    int attr;
+    dimmed_attr(&attr); // Make dimmed if possible
+
+    // Draw a vertical separator line
+    if(is_called) // if was called by pressing tab, the line is bright
+        attron(COLOR_PAIR(10));
+    else
+        attron(attr); // dimmed otherwise
+    for(int i = 0; i < rows; i++)
+        mvaddch(i, len, '|');
+
+    if(is_called)
+        attron(attr);
+    attron(A_BOLD);
+    for(int i = 0; i < side_bar_menu_count; i++)
+        mvaddstr(y_pos + i, x_pos, menu_items[i]);
+    attroff(A_BOLD);
+
+    if(!is_called)
+        return;
+    int highlighted = 0;
+    while(1) {
+        // Draw menu items
+        attron(A_BOLD);
+        for(int i = 0; i < side_bar_menu_count; i++) {
+            int ch;
+            if(i == highlighted) {
+                ch = '>';
+                attron(COLOR_PAIR(10));
+                attroff(attr);
+            }
+            else
+                ch = ' ';
+            mvprintw(y_pos + i, x_pos, "%c %s", ch, menu_items[i]);
+            if(i == highlighted) {
+                attroff(COLOR_PAIR(10));
+                attron(attr);
+            }
+        }
+        attroff(A_BOLD);
+
+        int key = getch();
+        switch(key) {
+        case KEY_DOWN:
+        case 'j':
+            highlighted = (highlighted + 1) % side_bar_menu_count;
+            break;
+        case KEY_UP:
+        case 'k':
+            highlighted = (highlighted - 1 + side_bar_menu_count)
+                % side_bar_menu_count;
+            break;
+        case key_enter:
+        case key_tab:
+            return;
+        }
+    }
+    attroff(attr);
 }
 
 static void main_screen(Habit *habits, int *total) {
@@ -788,10 +871,14 @@ static void main_screen(Habit *habits, int *total) {
         }
         
         erase();
-        int list_x = (c - dashboard_length) / 2;
+
+        int side_bar_len = get_side_bar_len(c);
+        draw_side_bar(r, side_bar_len, false);
+
+        int list_x = (c - dashboard_length) / 2 + side_bar_len / 2;
         int list_y = (r - *total) / 2;
 
-        draw_status_bar(r, c, habits, *total, view_day);
+        draw_status_bar(r, c, side_bar_len, habits, *total, view_day);
 
         if(*total == 0)
             mvprintw(list_y, list_x, "No habits found. Press 1 to add.");
@@ -801,11 +888,14 @@ static void main_screen(Habit *habits, int *total) {
                 draw_habit_item(list_y + i, list_x, view_day, i == highlight, habits[i]);
         }
 
-        action_bar(r, c);
+        action_bar(r, c, side_bar_len);
         refresh();
 
         int ch = getch();
         switch(ch) {
+            case key_tab:
+                draw_side_bar(r, side_bar_len, true);
+                break;
             case KEY_RESIZE:
                 break;
             case 'k':   
@@ -847,11 +937,7 @@ static void main_screen(Habit *habits, int *total) {
             case 'c':
                 if(*total > 0) draw_calendar(&habits[highlight]);
                 break;
-            case '5':
-            case 't':
-                color_themes();
-                break;
-            case '6': 
+            case '5': 
             case 'q':
             case key_escape:
                 upload_to_disk(habits, *total);
