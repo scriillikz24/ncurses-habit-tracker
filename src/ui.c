@@ -1,93 +1,14 @@
-#define _DEFAULT_SOURCE
-#include <curses.h>
-#include <stdio.h>
+#include "ui.h"
+#include "save.h"
+#include "colors.h"
+
 #include <stdlib.h>
 #include <stdbool.h>
-#include <string.h>
 #include <time.h>
-#include <limits.h>
+#include <curses.h>
+#include <string.h>
 
-#ifndef PATH_MAX
-    #define PATH_MAX 4096
-#endif
-#define HABITS_FILE ".habits.csv"
-#define ESC_HINT "<- Esc"
-
-enum { 
-    key_escape = 27, 
-    key_enter = 10,
-    key_tab = 9,
-    esc_hint_length = 6,
-    name_max_length = 25,
-    checkbox_offset = 30,
-    dashboard_length = 49,
-    calendar_length = 20,
-    calendar_height = 9,
-    action_bar_length = 57,
-    max_habits_amount = 10,
-    colors_max = 256,
-    habit_fields = 4,
-    bar_gap = 4,
-    months_in_year = 12,
-    days_in_year = 366,
-    days_in_week = 7,
-    weeks_in_year = 53,
-    themes_count = 2,
-    side_bar_ratio = 15, // The part of the whole screen it takes in percents
-};
-
-enum action_bar_indices {
-    idx_add = 0,
-    idx_delete,
-    idx_rename,
-    idx_calendar,
-    idx_quit,
-    action_bar_menu_count
-};
-
-enum side_bar_indices {
-    idx_schemes = 0,
-    idx_configs,
-    side_bar_menu_count
-};
-
-typedef struct Habit {
-    char name[name_max_length];
-    time_t last_done;
-    int year;
-    bool history[days_in_year];
-} Habit;
-
-static void mark_habit_done(Habit *habit, int yday) {
-    habit->history[yday] = !habit->history[yday];
-    if(habit->history[yday]) 
-        habit->last_done = time(NULL);
-    else
-        habit->last_done = 0;
-}
-
-static int get_streak(Habit habit, int today)
-{
-    if(!habit.history[today])
-        return 0; // No streak
-    int day = today;
-
-    while(day >= 0) {
-        if(habit.history[day])
-            day--;
-        else break;
-    }
-    return today - day;
-}
-
-static void dimmed_attr(int *attr)
-{
-    *attr = COLOR_PAIR(3);
-    if(COLORS < colors_max)
-        *attr |= A_DIM;
-}
-
-static void draw_habit_item(int y, int x, int selected_yday, bool highlighted, Habit habit) {
+void draw_habit_item(int y, int x, int selected_yday, bool highlighted, Habit habit) {
     time_t now = time(NULL);
     int real_today = localtime(&now)->tm_yday;
 
@@ -152,139 +73,7 @@ static void draw_habit_item(int y, int x, int selected_yday, bool highlighted, H
     }
 }
 
-static void get_data_path(char *dest) {
-    const char *home = getenv("HOME");
-    if(home == NULL)
-        strncpy(dest, HABITS_FILE, PATH_MAX);
-    else
-        snprintf(dest, PATH_MAX, "%s/%s", home, HABITS_FILE);
-}
-
-static void load_habits(Habit *habits, int *current_total) {
-    char path[PATH_MAX];
-    get_data_path(path);
-
-    FILE *from = fopen(path, "r");
-    if(!from) return;
-    char line[512];
-    int i = 0;
-
-    char fmt[64];
-    char s_fmt[20];
-
-    time_t now = time(NULL);
-    int current_year = localtime(&now)->tm_year + 1900;
-
-    snprintf(s_fmt, sizeof(s_fmt), "%%%ds", days_in_year);
-    snprintf(fmt, sizeof(fmt), " %%%d[^,],%%ld,%%d,%s", name_max_length - 1, s_fmt);
-
-    while(fgets(line, sizeof(line), from) && i < max_habits_amount) {
-        char s[days_in_year + 1];
-        if(sscanf(line, fmt, habits[i].name, &habits[i].last_done, &habits[i].year, s) == habit_fields) {
-            if(habits[i].year != current_year) {
-                memset(habits[i].history, 0, sizeof(habits[i].history));
-                habits[i].year = current_year;
-            } else
-                for(int j = 0; j < days_in_year; j++)
-                    habits[i].history[j] = (s[j] == '1');
-            i++;
-        }
-            
-    }
-    *current_total = i;
-    fclose(from);
-}
-
-static void upload_to_disk(Habit *habits, int current_total) {
-    char path[PATH_MAX];
-    get_data_path(path);
-
-    FILE *dest = fopen(path, "w");
-    if(!dest) return;
-
-    for(int i = 0; i < current_total; i++) {
-        fprintf(dest, "%s,%ld,%d,", 
-                habits[i].name, 
-                habits[i].last_done, 
-                habits[i].year);
-        for(int j = 0; j < days_in_year; j++)
-            fputc(habits[i].history[j] ? '1' : '0', dest);
-        fputc('\n', dest);
-    }
-    fclose(dest);
-}
-
-static void action_bar(int rows, int cols, int start_x)
-{
-    static const char *menu_items[action_bar_menu_count] = {
-        "1 Add",
-        "2 Delete",
-        "3 Rename",
-        "4 Calendar",
-        "5 Quit"
-    };
-    int total_width = 0;
-    for(int i = 0; i < action_bar_menu_count; i++) 
-        total_width += strlen(menu_items[i]) + bar_gap;
-
-    // Center the bar at the bottom of the screen
-    int x_offset = (cols - total_width + bar_gap) / 2 + start_x / 2;
-    int y_pos = rows - 2;
-
-    // Draw a background strip for the menu
-    int attr;
-    dimmed_attr(&attr);
-    attron(attr); 
-    mvhline(y_pos - 1, start_x + 1, ACS_HLINE, cols - start_x - 1); 
-    mvhline(y_pos + 1, start_x + 1, ACS_HLINE, cols - start_x - 1); 
-    attroff(attron(attr)); 
-    
-    // Draw menu items
-    for(int i = 0; i < action_bar_menu_count; i++) {
-        mvaddstr(y_pos, x_offset, menu_items[i]);
-        x_offset += strlen(menu_items[i]) + bar_gap;
-    }
-}
-
-static bool get_text_input(WINDOW *win, char *buffer, int max_len) {
-    int char_count = strlen(buffer);
-    int ch;
-    curs_set(1);
-    
-    // If editing existing text, print it first
-    mvwprintw(win, 1, 1, "%s", buffer); 
-    wrefresh(win);
-
-    while(1) {
-        ch = wgetch(win);
-        if(ch == key_escape) {
-            curs_set(0);
-            return false; // User cancelled
-        }
-        else if(ch == key_enter) {
-            break; // User finished
-        }
-        else if(ch == KEY_BACKSPACE || ch == 127) { // Handle 127 for Mac/some terms
-            if(char_count > 0) {
-                char_count--;
-                buffer[char_count] = '\0';
-                mvwaddch(win, 1, 1 + char_count, ' '); // Clear visual
-                wmove(win, 1, 1 + char_count);         // Move cursor back
-            }
-        }
-        else if(ch >= 32 && ch <= 126 && char_count < max_len - 1) {
-            buffer[char_count] = (char)ch;
-            char_count++;
-            buffer[char_count] = '\0';
-            waddch(win, ch);
-        }
-        wrefresh(win);
-    }
-    curs_set(0);
-    return true;
-}
-
-static void add_habit(Habit *list, int *current_total) {
+void add_habit(Habit *list, int *current_total) {
     clear();
     refresh();
 
@@ -297,7 +86,6 @@ static void add_habit(Habit *list, int *current_total) {
         getch();
         return;
     }
-
 
     int height = 3;
     int width = name_max_length + 25; // 25 chars for query text & <-Esc
@@ -315,38 +103,12 @@ static void add_habit(Habit *list, int *current_total) {
     mvwprintw(win, 1, width - esc_hint_length - 1, ESC_HINT);
     wattroff(win, attron(attr)); 
 
-    char temp_name[name_max_length] = {0};
-    
-    do {
-        if(!get_text_input(win, temp_name, name_max_length)) {
-            delwin(0);
-            return;
-        }
-    } while(strlen(temp_name) <= 0);
-    strncpy(list[*current_total].name, temp_name, name_max_length - 1);
-    list[*current_total].name[name_max_length - 1] = '\0';
-    
-    time_t now = time(NULL);
-
-    list[*current_total].last_done = 0;
-    list[*current_total].year = localtime(&now)->tm_year + 1900;
-    for(int i = 0; i < days_in_year; i++)
-        list[*current_total].history[i] = false;
-    (*current_total)++;
+    add_habit_logic(list, current_total, win);
 
     delwin(win);
 }
 
-static void delete_habit(int index, Habit *habits, int *current_total)
-{
-    int i;
-    for(i = index; i < (*current_total) - 1; i++) {
-        habits[i] = habits[i+1];
-    }
-    (*current_total)--;
-}
-
-static void rename_habit(Habit *habit)
+void rename_habit(Habit *habit)
 {
     clear();
     refresh();
@@ -371,22 +133,12 @@ static void rename_habit(Habit *habit)
     wattroff(win, attron(attr)); 
     wrefresh(win);
 
-    char temp_name[name_max_length] = {0};
-    strncpy(temp_name, habit->name, name_max_length - 1);
-    temp_name[name_max_length - 1] = '\0';
-    do {
-        if(!get_text_input(win, temp_name, name_max_length)) {
-            delwin(0);
-            return;
-        }
-    } while(strlen(temp_name) <= 0);
-    strncpy(habit->name, temp_name, name_max_length - 1);
-    habit->name[name_max_length - 1] = '\0';
+    rename_habit_logic(habit, win);
 
     delwin(win);
 }
 
-static void print_week_labels(int y, int x)
+void print_week_labels(int y, int x)
 {
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
@@ -412,7 +164,7 @@ static void print_week_labels(int y, int x)
     }
 }
 
-static bool confirm_delete(const char *habit_name) {
+bool confirm_delete(const char *habit_name) {
     int rows, cols;
     getmaxyx(stdscr, rows, cols);
     clear();
@@ -475,11 +227,13 @@ static bool confirm_delete(const char *habit_name) {
     return result;
 }
 
-static void color_themes(int sd_bar_len) {
-    timeout(-1);
-
+void color_themes_menu(int sd_bar_len) {
     int cols, rows;
     getmaxyx(stdscr, rows, cols);
+
+    enum {
+        themes_count = 2,
+    };
 
     static const char *col_themes[themes_count] = {
         "Classic",
@@ -534,8 +288,13 @@ static void color_themes(int sd_bar_len) {
     }
 }
 
-static void draw_calendar(Habit *h) {
-    timeout(-1);
+void draw_calendar(Habit *h) {
+    enum {
+        calendar_length = 20,
+        calendar_height = 9,
+        months_in_year = 12,
+    };
+
     // 1. Setup Time Data
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
@@ -707,15 +466,12 @@ static void draw_calendar(Habit *h) {
                 mark_habit_done(h, view_day.tm_yday); 
                 break;
             case key_escape: 
-                timeout(0);
                 return;
         }
     }
-    timeout(0);
 }
 
-static void draw_status_bar(int rows, int cols,
-        int start_x, Habit *habits, int total, int view_day) {
+void draw_status_bar(int rows, int cols, int start_x, Habit *habits, int total, int view_day) {
     if (total == 0) return; // Prevent division by zero
 
     // 1. Calculate counts
@@ -772,21 +528,30 @@ static void draw_status_bar(int rows, int cols,
 
 static int get_side_bar_len(int cols)
 {
+    enum {
+        side_bar_ratio = 15, // The part of the whole screen it takes in percents
+    };
     return cols * (side_bar_ratio / 100.0);
 }
 
-static void side_bar_perform(int option, int side_bar_len)
+static void side_bar_switch(int option, int side_bar_len)
 {
     switch(option) {
     case 0:
-    case 't':
-        color_themes(side_bar_len);
-        return;
+        color_themes_menu(side_bar_len);
+        break;
+    case 1:
+        break;
     }
 }
 
-static void draw_side_bar(int rows, int len,
-        int is_called) {
+void draw_side_bar(int rows, int len, int is_called) {
+    enum side_bar_indices {
+        idx_schemes = 0,
+        idx_configs,
+        side_bar_menu_count
+    };
+
     static const char *menu_items[side_bar_menu_count] = {
         "1.Color Schemes",
         "2.Configs"
@@ -855,7 +620,7 @@ static void draw_side_bar(int rows, int len,
                 % side_bar_menu_count;
             break;
         case key_enter:
-            side_bar_perform(highlighted, len);
+            side_bar_switch(highlighted, len);
             return;
         case key_tab:
         case key_escape:
@@ -865,7 +630,52 @@ static void draw_side_bar(int rows, int len,
     attroff(attr);
 }
 
-static void main_screen(Habit *habits, int *total) {
+static void action_bar(int rows, int cols, int start_x)
+{
+    enum action_bar_indices {
+        idx_add = 0,
+        idx_delete,
+        idx_rename,
+        idx_calendar,
+        idx_quit,
+        action_bar_menu_count
+    };
+
+    static const char *menu_items[action_bar_menu_count] = {
+        "1 Add",
+        "2 Delete",
+        "3 Rename",
+        "4 Calendar",
+        "5 Quit"
+    };
+    int total_width = 0;
+    for(int i = 0; i < action_bar_menu_count; i++) 
+        total_width += strlen(menu_items[i]) + bar_gap;
+
+    // Center the bar at the bottom of the screen
+    int x_offset = (cols - total_width + bar_gap) / 2 + start_x / 2;
+    int y_pos = rows - 2;
+
+    // Draw a background strip for the menu
+    int attr;
+    dimmed_attr(&attr);
+    attron(attr); 
+    mvhline(y_pos - 1, start_x + 1, ACS_HLINE, cols - start_x - 1); 
+    mvhline(y_pos + 1, start_x + 1, ACS_HLINE, cols - start_x - 1); 
+    attroff(attron(attr)); 
+    
+    // Draw menu items
+    for(int i = 0; i < action_bar_menu_count; i++) {
+        mvaddstr(y_pos, x_offset, menu_items[i]);
+        x_offset += strlen(menu_items[i]) + bar_gap;
+    }
+}
+
+void main_screen(Habit *habits, int *total) {
+    enum {
+        action_bar_length = 57,
+    };
+
     int highlight = 0;
     time_t now = time(NULL);
     int real_today = localtime(&now)->tm_yday;
@@ -965,52 +775,4 @@ static void main_screen(Habit *habits, int *total) {
                 exit(0);
         }
     }
-}
-
-static void init_colors()
-{
-    if(!has_colors())
-        return;
-
-    start_color();
-
-    init_pair(1, COLOR_GREEN, COLOR_WHITE); 
-    init_pair(2, COLOR_GREEN, COLOR_BLACK);
-    init_pair(5, COLOR_RED, COLOR_BLACK);
-    init_pair(6, COLOR_YELLOW, COLOR_BLACK);
-    init_pair(10, COLOR_WHITE, COLOR_BLACK);
-
-    // High-Definition vs. Fallback Pairs
-    if(COLORS >= colors_max) {
-        init_pair(3, 242, COLOR_BLACK); // Dimmed grey
-        init_pair(4, COLOR_GREEN, 242);
-        init_pair(7, COLOR_RED, 242);
-        init_pair(8, COLOR_WHITE, 242);
-        init_pair(9, 250, COLOR_BLACK); // Light grey
-    } else {
-        // Fallback for 8/16 color terminals (e.g., standard macOS Terminal)
-        init_pair(3, COLOR_WHITE, COLOR_BLACK); // Use white... 
-        init_pair(4, COLOR_GREEN, COLOR_WHITE);
-        init_pair(7, COLOR_RED, COLOR_WHITE);
-        init_pair(8, COLOR_BLACK, COLOR_WHITE);
-        init_pair(9, COLOR_WHITE, COLOR_BLACK);
-    }
-}
-
-int main() {
-    initscr();
-    cbreak();
-    noecho();
-    keypad(stdscr, 1);
-    init_colors();
-    curs_set(0);
-
-    int total = 0;
-    Habit my_habits[max_habits_amount];
-
-    load_habits(my_habits, &total);
-    main_screen(my_habits, &total);
-
-    endwin();
-    return 0;
 }

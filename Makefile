@@ -1,23 +1,20 @@
 CC=gcc
-CFLAGS=-Wall -g
+CFLAGS=-Wall -g -Iinclude
 LDFLAGS=-lcurses
-TARGET=habits
-SRC=tracker.c
+TARGET=tracker
 
-# Default 'make' command - just compiles locally
-all: $(TARGET)
+OBJ = \
+	  src/main.o \
+	  src/colors.o \
+	  src/habit.o \
+	  src/save.o \
+	  src/ui.o \
 
-$(TARGET): $(SRC)
-	$(CC) $(CFLAGS) $(SRC) $(LDFLAGS) -o $(TARGET) 
+prog: $(OBJ)
+	$(CC) $(OBJ) $(LDFLAGS) -o tracker
 
-# Only run this when you want to update the "system-wide" version
-install: all
-	sudo cp $(TARGET) /usr/local/bin/$(TARGET)
+src/%.o: src/%.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
-# Useful for a fresh start
 clean:
-	rm -f $(TARGET)
-
-# The "Dev Trick": Compile and Run in one command
-run: all
-	./$(TARGET)
+	rm -f src/*.o
